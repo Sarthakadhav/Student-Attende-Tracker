@@ -1,447 +1,274 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Bell,
-  ChevronRight,
-  LayoutDashboard,
-  FileText,
-  Search,
-  User,
   ArrowLeft,
-  CalendarDays,
-  Clock3,
   BookOpen,
-  FileCheck,
+  CalendarDays,
+  Check,
+  ChevronRight,
   ClipboardCheck,
+  Clock3,
+  FileText,
+  LayoutDashboard,
+  X,
 } from "lucide-react";
+import { api } from "../api";
+import Header from "../components/Header";
+import Sidebar from "../components/Sidebar";
+import type { NavItem } from "../components/Sidebar";
+import StatusBadge from "../components/StatusBadge";
+import type {
+  ApplicationStatus,
+  AttendanceNumbers,
+  AttendanceRecord,
+  LeaveApplication,
+  User,
+} from "../types";
+import {
+  ATTENDANCE_THRESHOLD,
+  formatDate,
+  formatFileSize,
+  formatRange,
+  formatTime,
+  initials,
+  timeAgo,
+} from "../utils/format";
 import "./Faculty.css";
 
-type Lecture = {
-  date: string;
-  subject: string;
-  time: string;
-};
+type Page = "dashboard" | "attendance" | "application";
 
-type LeaveApplication = {
-  id: number;
-  studentName: string;
-  reason: string;
-  startDate: string;
-  endDate: string;
-  submittedAt: string;
-  unread: boolean;
-  lectures: Lecture[];
-};
-
-/* =========================================
-   DUMMY APPLICATION DATA
-========================================= */
-
-const initialApplications: LeaveApplication[] = [
-  {
-    id: 1,
-    studentName: "Sarthak Adhav",
-    reason: "Inter-University Competition",
-    startDate: "01 January 2026",
-    endDate: "02 January 2026",
-    submittedAt: "Just now",
-    unread: true,
-    lectures: [
-      {
-        date: "01 January 2026",
-        subject: "Database Management System",
-        time: "10:00 AM – 11:00 AM",
-      },
-      {
-        date: "02 January 2026",
-        subject: "Database Management System",
-        time: "10:00 AM – 11:00 AM",
-      },
-    ],
-  },
-  {
-    id: 2,
-    studentName: "Rahul Sharma",
-    reason: "Sports Competition",
-    startDate: "05 January 2026",
-    endDate: "06 January 2026",
-    submittedAt: "2 hours ago",
-    unread: true,
-    lectures: [
-      {
-        date: "05 January 2026",
-        subject: "Database Management System",
-        time: "10:00 AM – 11:00 AM",
-      },
-      {
-        date: "05 January 2026",
-        subject: "Database Management System",
-        time: "02:00 PM – 03:00 PM",
-      },
-      {
-        date: "06 January 2026",
-        subject: "Database Management System",
-        time: "10:00 AM – 11:00 AM",
-      },
-    ],
-  },
-  {
-    id: 3,
-    studentName: "Priya Shah",
-    reason: "Technical Event",
-    startDate: "08 January 2026",
-    endDate: "08 January 2026",
-    submittedAt: "Yesterday",
-    unread: false,
-    lectures: [
-      {
-        date: "08 January 2026",
-        subject: "Database Management System",
-        time: "11:00 AM – 12:00 PM",
-      },
-    ],
-  },
+const NAV: NavItem<Exclude<Page, "application">>[] = [
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { key: "attendance", label: "Calculate attendance", icon: ClipboardCheck },
 ];
 
-/* =========================================
-   DUMMY ATTENDANCE DATA
-========================================= */
-
-type AttendanceStudent = {
-  id: number;
-  name: string;
-  missedLectures: number;
-  attendanceImpact: number;
+type FacultyProps = {
+  user: User;
+  onLogout: () => void;
 };
 
-const attendanceStudents: AttendanceStudent[] = [
-  {
-    id: 1,
-    name: "Sarthak Adhav",
-    missedLectures: 4,
-    attendanceImpact: 10,
-  },
-  {
-    id: 2,
-    name: "Rahul Sharma",
-    missedLectures: 6,
-    attendanceImpact: 15,
-  },
-  {
-    id: 3,
-    name: "Priya Shah",
-    missedLectures: 3,
-    attendanceImpact: 7.5,
-  },
-];
-
 /* =========================================
-   APP
+   FACULTY PORTAL
 ========================================= */
 
-function App() {
-  const [applications, setApplications] =
-    useState<LeaveApplication[]>(initialApplications);
+function Faculty({ user, onLogout }: FacultyProps) {
+  const [applications, setApplications] = useState<LeaveApplication[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState<Page>("dashboard");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const [selectedApplication, setSelectedApplication] =
-    useState<LeaveApplication | null>(null);
+  const loadApplications = useCallback(
+    () =>
+      api
+        .applications()
+        .then((data) => {
+          setApplications(data.applications);
+          setError("");
+        })
+        .catch((err: Error) => setError(err.message))
+        .finally(() => setLoading(false)),
+    []
+  );
 
-  const [activePage, setActivePage] = useState<
-    "dashboard" | "attendance" | "application"
-  >("dashboard");
+  useEffect(() => {
+    loadApplications();
+  }, [loadApplications]);
 
-  const openApplication = (application: LeaveApplication) => {
+  const replaceApplication = (updated: LeaveApplication) =>
     setApplications((current) =>
-      current.map((item) =>
-        item.id === application.id
-          ? { ...item, unread: false }
-          : item
-      )
+      current.map((item) => (item.id === updated.id ? updated : item))
     );
 
-    setSelectedApplication({
-      ...application,
-      unread: false,
-    });
-
+  const openApplication = (application: LeaveApplication) => {
+    setSelectedId(application.id);
     setActivePage("application");
+
+    if (application.unread) {
+      replaceApplication({ ...application, unread: false });
+      api.markRead(application.id).catch(() => {
+        /* not critical: it shows as unread again after a refresh */
+      });
+    }
   };
 
-  const goBack = () => {
-    setSelectedApplication(null);
+  const goToDashboard = () => {
+    setSelectedId(null);
     setActivePage("dashboard");
   };
 
-  const openAttendance = () => {
-    setSelectedApplication(null);
-    setActivePage("attendance");
-  };
+  const selectedApplication = applications.find((a) => a.id === selectedId) ?? null;
 
   return (
     <div className="app">
+      <Sidebar
+        portalName="Faculty portal"
+        items={NAV}
+        active={activePage === "attendance" ? "attendance" : "dashboard"}
+        onNavigate={(key) => {
+          setSelectedId(null);
+          setActivePage(key);
+        }}
+        userName={user.name}
+        userDetail={user.designation ?? "Faculty"}
+        onLogout={onLogout}
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+      />
 
-      {/* SIDEBAR */}
-      <aside className="sidebar">
-
-        <div className="brand">
-          <div className="brand-logo">
-            <FileCheck size={21} />
-          </div>
-
-          <div>
-            <h2>University</h2>
-            <span>Attendance Portal</span>
-          </div>
-        </div>
-
-        <nav className="sidebar-nav">
-
-          <button
-            className={`nav-link ${
-              activePage === "dashboard" ? "active" : ""
-            }`}
-            onClick={() => {
-              setSelectedApplication(null);
-              setActivePage("dashboard");
-            }}
-          >
-            <LayoutDashboard size={18} />
-            <span>Dashboard</span>
-          </button>
-
-          <button
-            className={`nav-link ${
-              activePage === "attendance" ? "active" : ""
-            }`}
-            onClick={openAttendance}
-          >
-            <ClipboardCheck size={18} />
-            <span>Calculate Attendance</span>
-          </button>
-
-        </nav>
-
-        <div className="sidebar-profile">
-
-          <div className="profile-avatar">
-            FA
-          </div>
-
-          <div>
-            <strong>Faculty</strong>
-            <span>Computer Science</span>
-          </div>
-
-        </div>
-
-      </aside>
-
-
-      {/* MAIN */}
       <main className="main">
+        <Header
+          title="Faculty portal"
+          userName={user.name}
+          userDetail="2026–27"
+          hasUnread={applications.some((a) => a.unread)}
+          onBellClick={goToDashboard}
+          onMenuClick={() => setMenuOpen(true)}
+        />
 
-        {/* TOPBAR */}
-        <header className="topbar">
-
-          <div className="topbar-left">
-            <span className="topbar-title">
-              Faculty Portal
-            </span>
-          </div>
-
-          <div className="topbar-right">
-
-            <button className="top-icon">
-              <Search size={19} />
-            </button>
-
-            <button className="top-icon notification-icon">
-
-              <Bell size={19} />
-
-              {applications.some(
-                (application) => application.unread
-              ) && <span className="notification-indicator" />}
-
-            </button>
-
-            <div className="top-profile">
-
-              <div className="top-profile-avatar">
-                <User size={17} />
-              </div>
-
-              <div className="top-profile-info">
-                <strong>Faculty</strong>
-                <span>2026–27</span>
-              </div>
-
-            </div>
-
-          </div>
-
-        </header>
-
-
-        {/* CONTENT */}
         <div className="content">
+          {error && <div className="page-error">{error}</div>}
 
           {activePage === "attendance" ? (
-
-            <AttendanceCalculation
-              onBack={() => {
-                setActivePage("dashboard");
-                setSelectedApplication(null);
-              }}
-            />
-
-          ) : activePage === "application" &&
-            selectedApplication ? (
-
+            <AttendanceCalculation onBack={goToDashboard} />
+          ) : activePage === "application" && selectedApplication ? (
             <ApplicationDetails
+              key={selectedApplication.id}
               application={selectedApplication}
-              onBack={goBack}
+              onBack={goToDashboard}
+              onReviewed={replaceApplication}
             />
-
           ) : (
-
             <Dashboard
+              name={user.name}
               applications={applications}
+              loading={loading}
               onOpen={openApplication}
+              onRefresh={loadApplications}
             />
-
           )}
-
         </div>
-
       </main>
-
     </div>
   );
 }
-
 
 /* =========================================
    DASHBOARD
 ========================================= */
 
+type Filter = ApplicationStatus | "all";
+
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "pending", label: "Waiting" },
+  { key: "approved", label: "Approved" },
+  { key: "rejected", label: "Rejected" },
+  { key: "all", label: "All" },
+];
+
 type DashboardProps = {
+  name: string;
   applications: LeaveApplication[];
+  loading: boolean;
   onOpen: (application: LeaveApplication) => void;
+  onRefresh: () => void;
 };
 
-function Dashboard({
-  applications,
-  onOpen,
-}: DashboardProps) {
+function Dashboard({ name, applications, loading, onOpen, onRefresh }: DashboardProps) {
+  const [filter, setFilter] = useState<Filter>("pending");
+
+  const pendingCount = applications.filter((a) => a.status === "pending").length;
+  const visible =
+    filter === "all" ? applications : applications.filter((a) => a.status === filter);
 
   return (
     <>
-
       <section className="welcome-section">
-
         <div>
-
-          <p className="section-label">
-            FACULTY PORTAL
-          </p>
-
-          <h1>
-            Welcome back, Professor! 👋
-          </h1>
-
+          <h1>Welcome back, {name}</h1>
           <p className="welcome-text">
-            Review leave applications that affect your lectures.
+            {pendingCount === 0
+              ? "No leave applications are waiting for you."
+              : `${pendingCount} leave application${
+                  pendingCount === 1 ? " is" : "s are"
+                } waiting for your review.`}
           </p>
-
         </div>
 
-        <div className="welcome-icon">
-          <Bell size={30} />
-        </div>
-
+        <button className="secondary-button" onClick={onRefresh}>
+          Refresh
+        </button>
       </section>
-
 
       <section className="notification-section">
-
-        <div className="section-heading">
-
+        <div className="section-heading section-heading-row">
           <div>
-            <h2>Notifications</h2>
-
-            <p>
-              New leave applications submitted by students.
-            </p>
+            <h2>Leave applications</h2>
+            <p>Submitted by students with the HOD-signed letter.</p>
           </div>
 
+          <div className="filter-tabs" role="tablist">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                role="tab"
+                aria-selected={filter === f.key}
+                className={filter === f.key ? "active" : ""}
+                onClick={() => setFilter(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
 
+        {loading ? (
+          <p className="page-loading">Loading applications…</p>
+        ) : visible.length === 0 ? (
+          <div className="empty-state">
+            <FileText size={24} />
+            <p>No applications here.</p>
+          </div>
+        ) : (
+          <div className="notification-list">
+            {visible.map((application) => (
+              <button
+                key={application.id}
+                className={`notification-card ${application.unread ? "unread" : ""}`}
+                onClick={() => onOpen(application)}
+              >
+                <div className="notification-main">
+                  <div className="notification-avatar">
+                    <FileText size={19} />
+                  </div>
 
-        <div className="notification-list">
-
-          {applications.map((application) => (
-
-            <button
-              key={application.id}
-              className={`notification-card ${
-                application.unread ? "unread" : ""
-              }`}
-              onClick={() => onOpen(application)}
-            >
-
-              <div className="notification-main">
-
-                <div className="notification-avatar">
-                  <FileText size={19} />
+                  <div className="notification-text">
+                    <p className="notification-message">
+                      <strong>{application.student.name}</strong> applied for{" "}
+                      {application.lectures.length} lecture
+                      {application.lectures.length === 1 ? "" : "s"} for{" "}
+                      {application.eventName}
+                    </p>
+                    <span>
+                      {formatRange(application.startDate, application.endDate)}, submitted{" "}
+                      {timeAgo(application.submittedAt).toLowerCase()}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="notification-text">
-
-                  <p className="notification-message">
-
-                    <strong>
-                      {application.studentName}
-                    </strong>{" "}
-
-                    submitted a new leave application
-
-                  </p>
-
-                  <span>
-                    {application.submittedAt}
-                  </span>
-
+                <div className="notification-action">
+                  <StatusBadge status={application.status} />
+                  {application.unread && <span className="unread-dot" />}
+                  <ChevronRight size={20} />
                 </div>
-
-              </div>
-
-
-              <div className="notification-action">
-
-                {application.unread && (
-                  <span className="unread-dot" />
-                )}
-
-                <ChevronRight size={20} />
-
-              </div>
-
-            </button>
-
-          ))}
-
-        </div>
-
+              </button>
+            ))}
+          </div>
+        )}
       </section>
-
     </>
   );
 }
-
-
-/* =========================================
-   ATTENDANCE CALCULATION
-========================================= */
 
 /* =========================================
    ATTENDANCE CALCULATION
@@ -451,104 +278,149 @@ type AttendanceCalculationProps = {
   onBack: () => void;
 };
 
-function AttendanceCalculation({
-  onBack,
-}: AttendanceCalculationProps) {
+function AttendanceCalculation({ onBack }: AttendanceCalculationProps) {
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [subject, setSubject] = useState("all");
+  const [includePending, setIncludePending] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api
+      .attendance()
+      .then((data) => setRecords(data.records))
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const subjects = records[0]?.subjects ?? [];
+
+  const rows = useMemo(
+    () =>
+      records.map((record) => {
+        const numbers: AttendanceNumbers =
+          subject === "all"
+            ? record.total
+            : record.subjects.find((s) => s.subjectCode === subject) ?? record.total;
+
+        const leave = numbers.dutyLeave + (includePending ? numbers.pendingLeave : 0);
+        const after =
+          Math.round(((numbers.attended + leave) / numbers.conducted) * 1000) / 10;
+
+        return { student: record.student, before: numbers.beforePercent, leave, after };
+      }),
+    [records, subject, includePending]
+  );
+
+  const belowCount = rows.filter((r) => r.after < ATTENDANCE_THRESHOLD).length;
+
   return (
     <section className="attendance-page">
-
-      <button
-        className="back-button"
-        onClick={onBack}
-      >
+      <button className="back-button" onClick={onBack}>
         <ArrowLeft size={17} />
         Back to dashboard
       </button>
 
       <div className="application-heading">
         <div>
-          <p className="section-label">
-            ATTENDANCE
-          </p>
-
-          <h1>
-            Calculate Attendance
-          </h1>
-
-          <p>
-            Review missed lectures and their attendance impact.
-          </p>
+          <h1>Calculate attendance</h1>
+          <p>Attendance before and after approved duty leave is added back.</p>
         </div>
       </div>
 
       <div className="attendance-card">
-
-        <div className="attendance-card-header">
+        <div className="attendance-card-header attendance-controls">
           <div>
             <h2>
-              Missed Lectures
+              {rows.length === 0
+                ? "No students yet"
+                : belowCount === 0
+                  ? "Every student is at 75% or above"
+                  : `${belowCount} student${belowCount === 1 ? " is" : "s are"} below 75%`}
             </h2>
+            <p>Duty leave only gives back lectures the student actually missed.</p>
+          </div>
 
-            <p>
-              Attendance impact of approved leave applications.
-            </p>
+          <div className="attendance-filters">
+            <select
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              aria-label="Subject"
+            >
+              <option value="all">All subjects</option>
+              {subjects.map((s) => (
+                <option key={s.subjectCode} value={s.subjectCode}>
+                  {s.subjectName}
+                </option>
+              ))}
+            </select>
+
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={includePending}
+                onChange={(e) => setIncludePending(e.target.checked)}
+              />
+              Also count applications waiting for review
+            </label>
           </div>
         </div>
 
-        <div className="attendance-table">
+        {error ? (
+          <p className="page-error table-message">{error}</p>
+        ) : loading ? (
+          <p className="page-loading table-message">Calculating…</p>
+        ) : rows.length === 0 ? (
+          <p className="page-loading table-message">No students have signed up yet.</p>
+        ) : (
+          <div className="attendance-table">
+            <div className="attendance-table-header attendance-grid-5">
+              <span>Student</span>
+              <span>Before</span>
+              <span>Duty leave</span>
+              <span>After</span>
+              <span>Status</span>
+            </div>
 
-          <div className="attendance-table-header">
-            <span>STUDENT</span>
-            <span>MISSED LECTURES</span>
-            <span>ATTENDANCE IMPACT</span>
-          </div>
-
-          {attendanceStudents.map((student) => (
-            <div
-              className="attendance-table-row"
-              key={student.id}
-            >
-
-              <div className="attendance-student">
-                <div className="attendance-avatar">
-                  {student.name
-                    .split(" ")
-                    .map((name) => name[0])
-                    .join("")}
+            {rows.map((row) => (
+              <div className="attendance-table-row attendance-grid-5" key={row.student.id}>
+                <div className="attendance-student">
+                  <div className="attendance-avatar">{initials(row.student.name)}</div>
+                  <div>
+                    <strong>{row.student.name}</strong>
+                    <span className="student-meta">
+                      {row.student.prn}, {row.student.year} {row.student.division}
+                    </span>
+                  </div>
                 </div>
 
-                <strong>
-                  {student.name}
-                </strong>
+                <span className="missed-lectures">{row.before}%</span>
+                <span className="missed-lectures">+{row.leave}</span>
+
+                <div className="attendance-percentage">
+                  <strong>{row.after}%</strong>
+                </div>
+
+                <span
+                  className={
+                    row.after >= ATTENDANCE_THRESHOLD ? "status-good" : "status-warning"
+                  }
+                >
+                  {row.after >= ATTENDANCE_THRESHOLD ? "Safe" : "Detention risk"}
+                </span>
               </div>
-
-              <span className="missed-lectures">
-                {student.missedLectures}
-              </span>
-
-              <div className="attendance-percentage">
-                <strong>
-                  {student.attendanceImpact}%
-                </strong>
-              </div>
-
-            </div>
-          ))}
-
-        </div>
+            ))}
+          </div>
+        )}
 
         <div className="attendance-footer">
           <span>
-            Dummy data for now
+            The attendance register is demo data until the department's records are
+            connected.
           </span>
-
-          <strong>
-            Used for detention calculation
-          </strong>
+          <strong>Threshold: {ATTENDANCE_THRESHOLD}%</strong>
         </div>
-
       </div>
-
     </section>
   );
 }
@@ -560,218 +432,229 @@ function AttendanceCalculation({
 type ApplicationDetailsProps = {
   application: LeaveApplication;
   onBack: () => void;
+  onReviewed: (application: LeaveApplication) => void;
 };
 
-function ApplicationDetails({
-  application,
-  onBack,
-}: ApplicationDetailsProps) {
+function ApplicationDetails({ application, onBack, onReviewed }: ApplicationDetailsProps) {
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState<"approved" | "rejected" | null>(null);
+  const [error, setError] = useState("");
+
+  const review = async (status: "approved" | "rejected") => {
+    setError("");
+    if (status === "rejected" && remark.trim().length < 3) {
+      setError("Add a remark so the student knows why it was rejected.");
+      return;
+    }
+
+    setSaving(status);
+    try {
+      const { application: updated } = await api.review(
+        application.id,
+        status,
+        remark.trim()
+      );
+      onReviewed(updated);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const openDocument = () => {
+    setError("");
+    api.openDocument(application.id).catch((err: Error) => setError(err.message));
+  };
+
+  const { student } = application;
 
   return (
-
     <section className="application-page">
-
-      <button
-        className="back-button"
-        onClick={onBack}
-      >
+      <button className="back-button" onClick={onBack}>
         <ArrowLeft size={17} />
-        Back to notifications
+        Back to applications
       </button>
 
-
-      <div className="application-heading">
-
+      <div className="application-heading application-heading-row">
         <div>
-
-          <p className="section-label">
-            LEAVE APPLICATION
-          </p>
-
-          <h1>
-            {application.studentName}
-          </h1>
-
+          <h1>{student.name}</h1>
           <p>
-            Submitted {application.submittedAt}
+            {student.prn}, {student.year} CSE division {student.division}. Submitted{" "}
+            {timeAgo(application.submittedAt).toLowerCase()}.
           </p>
-
         </div>
-
+        <StatusBadge status={application.status} />
       </div>
 
-
       <div className="details-layout">
-
         {/* LEFT */}
-
         <div className="details-left">
-
           <div className="info-card">
-
             <div className="card-title">
-
               <div className="card-icon">
                 <CalendarDays size={18} />
               </div>
-
               <div>
                 <h2>Leave details</h2>
-                <p>
-                  Information provided with the application.
-                </p>
+                <p>Information provided with the application.</p>
               </div>
-
             </div>
 
-
             <div className="info-item">
-
               <div className="info-label">
                 <CalendarDays size={16} />
                 Leave period
               </div>
-
-              <strong>
-                {application.startDate}
-                <span className="date-arrow">→</span>
-                {application.endDate}
-              </strong>
-
+              <strong>{formatRange(application.startDate, application.endDate)}</strong>
             </div>
-
 
             <div className="info-item">
-
               <div className="info-label">
                 <FileText size={16} />
-                Reason
+                Event
               </div>
-
               <strong>
-                {application.reason}
+                {application.eventName} ({application.category})
               </strong>
-
             </div>
 
+            {application.description && (
+              <div className="info-item">
+                <div className="info-label">
+                  <FileText size={16} />
+                  Details
+                </div>
+                <strong>{application.description}</strong>
+              </div>
+            )}
           </div>
 
-
-          {/* LECTURES */}
-
           <div className="info-card">
-
             <div className="card-title">
-
               <div className="card-icon">
                 <BookOpen size={18} />
               </div>
-
               <div>
                 <h2>Affected lectures</h2>
-
-                <p>
-                  Lectures from your timetable during this leave.
-                </p>
-
+                <p>Taken from the time table, with holidays and weekends skipped.</p>
               </div>
-
             </div>
 
-
             <div className="lecture-table">
-
               <div className="lecture-header">
                 <span>Date</span>
                 <span>Subject</span>
                 <span>Time</span>
               </div>
 
-
-              {application.lectures.map(
-                (lecture, index) => (
-
-                  <div
-                    className="lecture-item"
-                    key={index}
-                  >
-
-                    <div className="lecture-date">
-                      <CalendarDays size={15} />
-                      {lecture.date}
-                    </div>
-
-                    <div className="lecture-subject">
-                      {lecture.subject}
-                    </div>
-
-                    <div className="lecture-time">
-                      <Clock3 size={15} />
-                      {lecture.time}
-                    </div>
-
+              {application.lectures.map((lecture) => (
+                <div className="lecture-item" key={`${lecture.date}-${lecture.start}`}>
+                  <div className="lecture-date">
+                    <CalendarDays size={15} />
+                    {formatDate(lecture.date)}
                   </div>
-
-                )
-              )}
-
+                  <div className="lecture-subject">{lecture.subjectName}</div>
+                  <div className="lecture-time">
+                    <Clock3 size={15} />
+                    {formatTime(lecture.start)} – {formatTime(lecture.end)}
+                  </div>
+                </div>
+              ))}
             </div>
-
 
             <div className="lecture-footer">
-
-              <span>
-                Total affected lectures
-              </span>
-
-              <strong>
-                {application.lectures.length}
-              </strong>
-
+              <span>Total affected lectures</span>
+              <strong>{application.lectures.length}</strong>
             </div>
-
           </div>
-
         </div>
 
-
         {/* RIGHT */}
-
-        <aside className="document-card">
-
-          <div className="document-top">
-
-            <div className="document-icon">
-              <FileText size={23} />
+        <aside className="details-right">
+          <div className="document-card">
+            <div className="document-top">
+              <div className="document-icon">
+                <FileText size={23} />
+              </div>
+              <span className="document-type">
+                {application.document.mimeType === "application/pdf" ? "PDF" : "Image"}
+              </span>
             </div>
 
-            <span className="document-type">
-              DOCUMENT
-            </span>
+            <h2>HOD-signed letter</h2>
+            <p>
+              {application.document.originalName} (
+              {formatFileSize(application.document.size)}). Check the HOD's signature
+              before approving.
+            </p>
 
+            <button className="view-document" onClick={openDocument}>
+              <FileText size={16} />
+              View document
+              <ChevronRight size={16} />
+            </button>
           </div>
 
-          <h2>
-            HOD-signed application
-          </h2>
+          <div className="document-card decision-card">
+            <h2>Decision</h2>
 
-          <p>
-            View the leave application submitted
-            with the required HOD signature.
-          </p>
+            {application.status === "pending" ? (
+              <>
+                <label htmlFor="remark" className="form-label">
+                  Remark <span className="optional">(needed to reject)</span>
+                </label>
+                <textarea
+                  id="remark"
+                  rows={3}
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  placeholder="e.g. HOD signature missing"
+                  maxLength={300}
+                />
 
-          <button className="view-document">
-            <FileText size={16} />
-            View document
-            <ChevronRight size={16} />
-          </button>
+                {error && <p className="decision-error">{error}</p>}
 
+                <div className="decision-actions">
+                  <button
+                    className="danger-button"
+                    onClick={() => review("rejected")}
+                    disabled={saving !== null}
+                  >
+                    <X size={16} />
+                    {saving === "rejected" ? "Rejecting…" : "Reject"}
+                  </button>
+                  <button
+                    className="primary-button"
+                    onClick={() => review("approved")}
+                    disabled={saving !== null}
+                  >
+                    <Check size={16} />
+                    {saving === "approved" ? "Approving…" : "Approve"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p>
+                  {application.status === "approved" ? "Approved" : "Rejected"}
+                  {application.reviewedBy ? ` by ${application.reviewedBy}` : ""}
+                  {application.reviewedAt
+                    ? ` on ${formatDate(application.reviewedAt.slice(0, 10), false)}`
+                    : ""}
+                  .
+                </p>
+                {application.remark && (
+                  <p className="decision-remark">{application.remark}</p>
+                )}
+                {error && <p className="decision-error">{error}</p>}
+              </>
+            )}
+          </div>
         </aside>
-
       </div>
-
     </section>
   );
 }
 
-export default App;
+export default Faculty;

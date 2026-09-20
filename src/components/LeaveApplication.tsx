@@ -1,132 +1,141 @@
 import { useEffect, useState } from "react";
 import type { ChangeEvent, SubmitEvent } from "react";
-import {
-  AlertCircle,
-  CalendarDays,
-  CheckCircle2,
-  ClipboardList,
-  Clock3,
-  FileText,
-  Upload,
-  X,
-} from "lucide-react";
+import { AlertCircle, CheckCircle2, FileText, Info, Upload, X } from "lucide-react";
 import { api } from "../api";
-import type { LeaveApplication as Application, Lecture, SkippedDay } from "../types";
-import { formatDate, formatFileSize, formatRange, formatTime } from "../utils/format";
+import type { PreviewResult } from "../api";
+import type { Academic, ApplicationKind, LeaveApplication as Application } from "../types";
+import { formatDate, formatFileSize, formatRange } from "../utils/format";
+import CircularTable from "./CircularTable";
 
 interface LeaveApplicationProps {
   onBack: () => void;
-  onSubmitted: (application: Application) => void;
+  onOpenErp: () => void;
+  onSubmitted: () => void;
 }
 
-type Preview = {
-  key: string;
-  lectures: Lecture[];
-  skipped: SkippedDay[];
-  error: string;
-};
+type Preview = PreviewResult & { key: string; error: string };
 
 const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_SIZE = 5 * 1024 * 1024;
 
-const LeaveApplication = ({ onBack, onSubmitted }: LeaveApplicationProps) => {
-  const [categories, setCategories] = useState<string[]>([]);
+const LeaveApplication = ({ onBack, onOpenErp, onSubmitted }: LeaveApplicationProps) => {
+  const [academic, setAcademic] = useState<Academic | null>(null);
+  const [kind, setKind] = useState<ApplicationKind>("event");
   const [category, setCategory] = useState("");
   const [eventName, setEventName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [description, setDescription] = useState("");
-  // Named "file", not "document", so it doesn't hide the browser's global `document`.
-  const [file, setFile] = useState<File | null>(null);
+  const [evidenceType, setEvidenceType] = useState<"certificate" | "authority_permission">("certificate");
+  const [approvalLetter, setApprovalLetter] = useState<File | null>(null);
+  const [evidence, setEvidence] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<Application | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
 
   const datesReady = Boolean(startDate && endDate && endDate >= startDate);
-  const previewKey = `${startDate}|${endDate}`;
-  const currentPreview = datesReady && preview?.key === previewKey ? preview : null;
+  const previewKey = `${startDate}|${endDate}|${kind}`;
+  const current = datesReady && preview?.key === previewKey ? preview : null;
+  const missingErp = current?.rows.filter((r) => r.attended === null) ?? [];
 
   useEffect(() => {
     api
       .academic()
-      .then((data) => setCategories(data.categories))
+      .then(setAcademic)
       .catch((err: Error) => setError(err.message));
   }, []);
 
-  // Ask the server which timetable lectures fall in the chosen dates.
   useEffect(() => {
     if (!datesReady) return;
-
     let cancelled = false;
-    const key = `${startDate}|${endDate}`;
+    const key = `${startDate}|${endDate}|${kind}`;
 
     api
-      .previewLectures(startDate, endDate)
-      .then((data) => {
-        if (!cancelled) setPreview({ key, ...data, error: "" });
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setPreview({ key, lectures: [], skipped: [], error: err.message });
-      });
+      .preview(startDate, endDate, kind)
+      .then((data) => !cancelled && setPreview({ ...data, key, error: "" }))
+      .catch(
+        (err: Error) =>
+          !cancelled &&
+          setPreview({ key, lectures: [], skipped: [], rows: [], counted: false, error: err.message })
+      );
 
     return () => {
       cancelled = true;
     };
-  }, [datesReady, startDate, endDate]);
+  }, [datesReady, startDate, endDate, kind]);
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const pickFile = (setter: (f: File | null) => void) => (e: ChangeEvent<HTMLInputElement>) => {
     const chosen = e.target.files?.[0];
-    e.target.value = ""; // lets the same file be picked again after removing it
+    e.target.value = "";
     if (!chosen) return;
-
     if (!ALLOWED_TYPES.includes(chosen.type)) {
       setError("Upload a PDF, JPG or PNG file.");
       return;
     }
     if (chosen.size > MAX_SIZE) {
-      setError("File must be smaller than 5 MB.");
+      setError("Each file must be smaller than 5 MB.");
       return;
     }
-
     setError("");
-    setFile(chosen);
+    setter(chosen);
   };
 
   const handleSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
 
-    if (!category || eventName.trim().length < 3 || !startDate || !endDate) {
-      setError("Fill in the category, event name and both dates.");
+    if (!startDate || !endDate || endDate < startDate) {
+      setError("Choose valid dates.");
       return;
     }
-    if (endDate < startDate) {
-      setError("End date can't be before the start date.");
+    if (kind === "event") {
+      if (!category || eventName.trim().length < 3) {
+        setError("Choose the category and enter the event name.");
+        return;
+      }
+      if (!approvalLetter) {
+        setError("Upload the pre-approval letter for the event.");
+        return;
+      }
+      if (missingErp.length > 0) {
+        setError("Enter your ERP attendance for the subjects marked below first.");
+        return;
+      }
+    }
+    if (!evidence) {
+      setError(
+        kind === "medical"
+          ? "Upload the medical certificate."
+          : evidenceType === "certificate"
+            ? "Upload the participation certificate."
+            : "Upload the permission letter signed by the HoD or Dean."
+      );
       return;
     }
-    if (!file) {
-      setError("Upload the HOD-signed letter.");
-      return;
-    }
-    if (currentPreview && currentPreview.lectures.length === 0 && !currentPreview.error) {
-      setError("No lectures fall on these dates, so there's no attendance to add.");
+    if (current && !current.error && current.lectures.length === 0) {
+      setError("No lectures fall on these dates, so there's nothing to add.");
       return;
     }
 
     const form = new FormData();
-    form.append("category", category);
-    form.append("eventName", eventName.trim());
+    form.append("kind", kind);
     form.append("startDate", startDate);
     form.append("endDate", endDate);
     form.append("description", description.trim());
-    form.append("document", file);
+    if (kind === "event") {
+      form.append("category", category);
+      form.append("eventName", eventName.trim());
+      form.append("evidenceType", evidenceType);
+      form.append("approvalLetter", approvalLetter!);
+    }
+    form.append("evidence", evidence);
 
     setSubmitting(true);
     try {
       const { application } = await api.submitApplication(form);
       setSubmitted(application);
-      onSubmitted(application);
+      onSubmitted();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -141,31 +150,33 @@ const LeaveApplication = ({ onBack, onSubmitted }: LeaveApplicationProps) => {
           <div className="success-icon">
             <CheckCircle2 size={30} />
           </div>
-
           <h1>Application submitted</h1>
-          <p>Your class coordinator will review it and approve the duty leave.</p>
+          <p>
+            {submitted.kind === "medical"
+              ? "Your medical leave is recorded. As per the Registrar's circular, medical cases aren't counted for now."
+              : "Your class coordinator will verify it against ERP and your documents."}
+          </p>
 
           <div className="success-details">
             <div>
-              <span>Event</span>
+              <span>{submitted.kind === "medical" ? "Type" : "Event"}</span>
               <strong>{submitted.eventName}</strong>
             </div>
             <div>
-              <span>Leave period</span>
+              <span>Period</span>
               <strong>{formatRange(submitted.startDate, submitted.endDate)}</strong>
             </div>
             <div>
-              <span>Lectures covered</span>
-              <strong>{submitted.lectures.length}</strong>
+              <span>Sessions covered</span>
+              <strong>{submitted.sessions}</strong>
             </div>
             <div>
-              <span>Letter</span>
-              <strong>{submitted.document.originalName}</strong>
+              <span>Documents</span>
+              <strong>{submitted.documents.length}</strong>
             </div>
           </div>
 
           <div className="success-status">Waiting for review</div>
-
           <button className="primary-button" onClick={onBack}>
             Back to dashboard
           </button>
@@ -178,198 +189,259 @@ const LeaveApplication = ({ onBack, onSubmitted }: LeaveApplicationProps) => {
     <section className="leave-page">
       <div className="leave-page-heading">
         <div>
-          <h1>Apply for duty leave</h1>
-          <p>
-            For lectures you missed because of an event. Your attendance is updated once
-            it's approved.
-          </p>
+          <h1>Apply for attendance</h1>
+          <p>For lectures missed because of an approved event. You'll see your final attendance before you submit.</p>
         </div>
-
         <button className="secondary-button" onClick={onBack}>
           <X size={16} />
           Close
         </button>
       </div>
 
-      <div className="leave-layout">
-        <div className="leave-form-card">
-          {error && (
-            <div className="form-error" role="alert">
-              <AlertCircle size={17} />
-              {error}
-            </div>
-          )}
+      <form className="leave-form-card" onSubmit={handleSubmit} noValidate>
+        {error && (
+          <div className="form-error" role="alert">
+            <AlertCircle size={17} />
+            {error}
+          </div>
+        )}
 
-          <form onSubmit={handleSubmit} noValidate>
-            <div className="form-grid">
-              <div className="form-group">
-                <label htmlFor="category">Category</label>
-                <select
-                  id="category"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                >
-                  <option value="">Select category</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="eventName">Event name</label>
-                <input
-                  id="eventName"
-                  value={eventName}
-                  onChange={(e) => setEventName(e.target.value)}
-                  placeholder="e.g. Smart India Hackathon 2026"
-                  maxLength={120}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="startDate">From</label>
-                <input
-                  id="startDate"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="endDate">To</label>
-                <input
-                  id="endDate"
-                  type="date"
-                  value={endDate}
-                  min={startDate || undefined}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="description">
-                Details <span className="optional">(optional)</span>
-              </label>
-              <textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Venue, organiser, or anything the coordinator should know"
-                rows={3}
-                maxLength={500}
-              />
-            </div>
-
-            <div className="form-group">
-              <span className="form-label">HOD-signed letter</span>
-
-              {file ? (
-                <div className="selected-file">
-                  <FileText size={18} />
-                  <div>
-                    <strong>{file.name}</strong>
-                    <span>{formatFileSize(file.size)}</span>
-                  </div>
-                  <button type="button" onClick={() => setFile(null)} aria-label="Remove file">
-                    <X size={16} />
-                  </button>
-                </div>
-              ) : (
-                <label className="upload-box">
-                  <Upload size={20} />
-                  <div className="upload-content">
-                    <strong>Upload the signed letter</strong>
-                    <span>PDF, JPG or PNG, up to 5 MB</span>
-                  </div>
-                  <span className="upload-button">Choose file</span>
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    onChange={handleFileChange}
-                  />
-                </label>
-              )}
-
-              <p className="field-hint">
-                The letter must carry the HOD's signature, or the coordinator can't
-                approve it.
-              </p>
-            </div>
-
-            <div className="form-actions">
-              <button type="button" className="secondary-button" onClick={onBack}>
-                Cancel
-              </button>
-              <button type="submit" className="primary-button" disabled={submitting}>
-                {submitting ? "Submitting…" : "Submit application"}
-              </button>
-            </div>
-          </form>
+        <div className="segmented" role="radiogroup" aria-label="Type of leave">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={kind === "event"}
+            className={kind === "event" ? "active" : ""}
+            onClick={() => setKind("event")}
+          >
+            Event participation
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={kind === "medical"}
+            className={kind === "medical" ? "active" : ""}
+            onClick={() => setKind("medical")}
+          >
+            Medical
+          </button>
         </div>
 
-        <aside className="lecture-preview">
-          <div className="card-title">
-            <div className="card-icon">
-              <ClipboardList size={18} />
+        {kind === "medical" && (
+          <div className="info-note">
+            <Info size={17} />
+            As per the Registrar's circular, medical cases aren't counted until further instructions.
+            Your application is recorded and kept on file.
+          </div>
+        )}
+
+        {kind === "event" && (
+          <div className="form-grid">
+            <div className="form-group">
+              <label htmlFor="category">Category</label>
+              <select id="category" value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value="">Select category</option>
+                {academic?.categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div>
-              <h2>Lectures covered</h2>
-              <p>Worked out from your time table.</p>
+
+            <div className="form-group">
+              <label htmlFor="eventName">Event name</label>
+              <input
+                id="eventName"
+                value={eventName}
+                onChange={(e) => setEventName(e.target.value)}
+                placeholder="e.g. Smart India Hackathon 2026"
+                maxLength={120}
+              />
             </div>
+          </div>
+        )}
+
+        <div className="form-grid">
+          <div className="form-group">
+            <label htmlFor="startDate">From</label>
+            <input
+              id="startDate"
+              type="date"
+              value={startDate}
+              min={academic?.semester?.start}
+              max={academic?.semester?.end}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="endDate">To</label>
+            <input
+              id="endDate"
+              type="date"
+              value={endDate}
+              min={startDate || academic?.semester?.start}
+              max={academic?.semester?.end}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="description">
+            Details <span className="optional">(optional)</span>
+          </label>
+          <textarea
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={kind === "event" ? "Venue, organiser, your role" : "Anything the coordinator should know"}
+            rows={2}
+            maxLength={500}
+          />
+        </div>
+
+        {kind === "event" && (
+          <>
+            <FileField
+              label="Pre-approval letter"
+              hint="Permission for the event, taken before you went."
+              file={approvalLetter}
+              onPick={pickFile(setApprovalLetter)}
+              onRemove={() => setApprovalLetter(null)}
+            />
+
+            <div className="form-group">
+              <span className="form-label">Proof of participation</span>
+              <div className="radio-cards">
+                {(["certificate", "authority_permission"] as const).map((type) => (
+                  <label key={type} className={evidenceType === type ? "active" : ""}>
+                    <input
+                      type="radio"
+                      name="evidenceType"
+                      checked={evidenceType === type}
+                      onChange={() => setEvidenceType(type)}
+                    />
+                    <span>
+                      <strong>{type === "certificate" ? "Certificate" : "No certificate"}</strong>
+                      {academic?.evidenceTypes[type]}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        <FileField
+          label={
+            kind === "medical"
+              ? "Medical certificate"
+              : evidenceType === "certificate"
+                ? "Certificate (must show the exact dates)"
+                : "Permission letter signed by HoD / Dean"
+          }
+          file={evidence}
+          onPick={pickFile(setEvidence)}
+          onRemove={() => setEvidence(null)}
+        />
+
+        <div className="preview-card">
+          <div className="section-heading">
+            <h2>{kind === "event" ? "Your attendance if approved" : "Lectures during this period"}</h2>
+            <p>Worked out from your time table and the academic calendar. Labs count as 1 session.</p>
           </div>
 
           {!datesReady ? (
-            <p className="preview-empty">
-              Choose the dates to see which lectures this leave covers.
-            </p>
-          ) : !currentPreview ? (
-            <p className="preview-empty">Checking your time table…</p>
-          ) : currentPreview.error ? (
-            <p className="preview-empty preview-error">{currentPreview.error}</p>
+            <p className="preview-empty">Choose the dates to see the calculation.</p>
+          ) : !current ? (
+            <p className="preview-empty">Calculating…</p>
+          ) : current.error ? (
+            <p className="preview-empty preview-error">{current.error}</p>
+          ) : current.lectures.length === 0 ? (
+            <p className="preview-empty">No lectures fall on these dates.</p>
           ) : (
             <>
-              {currentPreview.lectures.length === 0 ? (
-                <p className="preview-empty">No lectures on these dates.</p>
-              ) : (
-                <ul className="preview-list">
-                  {currentPreview.lectures.map((lecture) => (
-                    <li key={`${lecture.date}-${lecture.start}`}>
-                      <strong>{lecture.subjectName}</strong>
-                      <span>
-                        <CalendarDays size={13} />
-                        {formatDate(lecture.date)}
-                        <Clock3 size={13} />
-                        {formatTime(lecture.start)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+              <CircularTable
+                rows={current.rows}
+                threshold={academic?.threshold ?? 75}
+                mode="application"
+                counted={current.counted}
+              />
+
+              {kind === "event" && missingErp.length > 0 && (
+                <div className="info-note warning-note">
+                  <AlertCircle size={17} />
+                  <span>
+                    Enter your ERP attendance for {missingErp.map((r) => r.subjectName).join(", ")} before
+                    submitting.{" "}
+                    <button type="button" className="link-button" onClick={onOpenErp}>
+                      Enter ERP attendance
+                    </button>
+                  </span>
+                </div>
               )}
 
-              {currentPreview.skipped.length > 0 && (
+              {current.skipped.length > 0 && (
                 <p className="preview-skipped">
-                  Skipped:{" "}
-                  {currentPreview.skipped
-                    .map((s) => `${formatDate(s.date, false)} (${s.reason})`)
-                    .join(", ")}
+                  No lectures on:{" "}
+                  {current.skipped.map((s) => `${formatDate(s.date, false)} (${s.reason})`).join(", ")}
                 </p>
               )}
-
-              <div className="preview-total">
-                <span>Total lectures</span>
-                <strong>{currentPreview.lectures.length}</strong>
-              </div>
             </>
           )}
-        </aside>
-      </div>
+        </div>
+
+        <div className="form-actions">
+          <button type="button" className="secondary-button" onClick={onBack}>
+            Cancel
+          </button>
+          <button type="submit" className="primary-button" disabled={submitting}>
+            {submitting ? "Submitting…" : "Submit application"}
+          </button>
+        </div>
+      </form>
     </section>
   );
 };
+
+type FileFieldProps = {
+  label: string;
+  hint?: string;
+  file: File | null;
+  onPick: (e: ChangeEvent<HTMLInputElement>) => void;
+  onRemove: () => void;
+};
+
+function FileField({ label, hint, file, onPick, onRemove }: FileFieldProps) {
+  return (
+    <div className="form-group">
+      <span className="form-label">{label}</span>
+      {file ? (
+        <div className="selected-file">
+          <FileText size={18} />
+          <div>
+            <strong>{file.name}</strong>
+            <span>{formatFileSize(file.size)}</span>
+          </div>
+          <button type="button" onClick={onRemove} aria-label={`Remove ${label}`}>
+            <X size={16} />
+          </button>
+        </div>
+      ) : (
+        <label className="upload-box">
+          <Upload size={20} />
+          <div className="upload-content">
+            <strong>Upload file</strong>
+            <span>PDF, JPG or PNG, up to 5 MB</span>
+          </div>
+          <span className="upload-button">Choose file</span>
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={onPick} />
+        </label>
+      )}
+      {hint && <p className="field-hint">{hint}</p>}
+    </div>
+  );
+}
 
 export default LeaveApplication;

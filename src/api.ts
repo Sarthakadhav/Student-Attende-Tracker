@@ -1,6 +1,10 @@
 import type {
-  AttendanceRecord,
+  Academic,
   AuthResponse,
+  CircularRow,
+  ClassAttendance,
+  ClassInfo,
+  ErpCourse,
   LeaveApplication,
   Lecture,
   SkippedDay,
@@ -25,22 +29,21 @@ export class ApiError extends Error {
 }
 
 type RequestOptions = {
-  method?: "GET" | "POST" | "PATCH";
+  method?: "GET" | "POST" | "PATCH" | "PUT";
   body?: unknown;
 };
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function send(path: string, options: RequestOptions = {}): Promise<Response> {
   const token = tokenStore.get();
   const headers: Record<string, string> = {};
 
   let body: BodyInit | undefined;
   if (options.body instanceof FormData) {
-    body = options.body; // browser sets the multipart boundary itself
+    body = options.body; // the browser sets the multipart boundary itself
   } else if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
-
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let response: Response;
@@ -50,9 +53,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     throw new ApiError(0, "Can't reach the server. Make sure the backend is running.");
   }
 
-  const data = await response.json().catch(() => ({}));
-
   if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
     const message = (data as { error?: string }).error;
     throw new ApiError(
       response.status,
@@ -62,53 +64,107 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
           : "Something went wrong.")
     );
   }
-
-  return data as T;
+  return response;
 }
 
-export type SignupPayload = {
-  role: "student" | "faculty";
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await send(path, options);
+  return (await response.json()) as T;
+}
+
+/** Opens a file from the API in a new tab (the request needs the login token). */
+async function openFile(path: string) {
+  const tab = window.open("", "_blank");
+  try {
+    const response = await send(path);
+    const url = URL.createObjectURL(await response.blob());
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (err) {
+    tab?.close();
+    throw err;
+  }
+}
+
+/** Downloads a file from the API with the name the server gives it. */
+async function downloadFile(path: string, fallbackName: string, method: "GET" | "POST" = "GET") {
+  const response = await send(path, { method });
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export type FacultySignup = {
   name: string;
   email: string;
   password: string;
-  prn?: string;
-  year?: string;
-  division?: string;
-  designation?: string;
-  facultyCode?: string;
+  designation: string;
+  facultyCode: string;
+  classes: string[];
+};
+
+export type PreviewResult = {
+  lectures: Lecture[];
+  skipped: SkippedDay[];
+  rows: CircularRow[];
+  counted: boolean;
 };
 
 export const api = {
-  signup: (payload: SignupPayload) =>
-    request<AuthResponse>("/api/auth/signup", { method: "POST", body: payload }),
+  classes: () => request<{ classes: ClassInfo[] }>("/api/classes"),
 
   login: (identifier: string, password: string) =>
-    request<AuthResponse>("/api/auth/login", {
-      method: "POST",
-      body: { identifier, password },
-    }),
+    request<AuthResponse>("/api/auth/login", { method: "POST", body: { identifier, password } }),
+
+  signup: (payload: FacultySignup) =>
+    request<AuthResponse>("/api/auth/signup", { method: "POST", body: payload }),
 
   me: () => request<{ user: User }>("/api/auth/me"),
 
-  previewLectures: (startDate: string, endDate: string) =>
-    request<{ lectures: Lecture[]; skipped: SkippedDay[] }>(
-      "/api/applications/preview",
-      { method: "POST", body: { startDate, endDate } }
-    ),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ user: User }>("/api/auth/change-password", {
+      method: "POST",
+      body: { currentPassword, newPassword },
+    }),
+
+  academic: () => request<Academic>("/api/academic"),
+
+  erp: () => request<{ ready: boolean; courses: ErpCourse[] }>("/api/erp-attendance"),
+
+  saveErp: (entries: { courseId: string; attended: number; total: number }[]) =>
+    request<{ ready: boolean; courses: ErpCourse[] }>("/api/erp-attendance", {
+      method: "PUT",
+      body: { entries },
+    }),
+
+  myAttendance: () =>
+    request<{ ready: boolean; rows: CircularRow[]; threshold: number }>("/api/attendance"),
+
+  preview: (startDate: string, endDate: string, kind: string) =>
+    request<PreviewResult>("/api/applications/preview", {
+      method: "POST",
+      body: { startDate, endDate, kind },
+    }),
 
   submitApplication: (form: FormData) =>
-    request<{ application: LeaveApplication }>("/api/applications", {
-      method: "POST",
-      body: form,
-    }),
+    request<{ application: LeaveApplication }>("/api/applications", { method: "POST", body: form }),
 
-  applications: () =>
-    request<{ applications: LeaveApplication[] }>("/api/applications"),
+  applications: (classId?: string) =>
+    request<{ applications: LeaveApplication[] }>(
+      classId ? `/api/applications?classId=${encodeURIComponent(classId)}` : "/api/applications"
+    ),
+
+  calculation: (id: string) =>
+    request<{ counted: boolean; rows: CircularRow[] }>(`/api/applications/${id}/calculation`),
 
   markRead: (id: string) =>
-    request<{ application: LeaveApplication }>(`/api/applications/${id}/read`, {
-      method: "PATCH",
-    }),
+    request<{ application: LeaveApplication }>(`/api/applications/${id}/read`, { method: "PATCH" }),
 
   review: (id: string, status: "approved" | "rejected", remark: string) =>
     request<{ application: LeaveApplication }>(`/api/applications/${id}/review`, {
@@ -116,31 +172,29 @@ export const api = {
       body: { status, remark },
     }),
 
-  attendance: () => request<{ records: AttendanceRecord[] }>("/api/attendance"),
+  openDocument: (applicationId: string, documentId: string) =>
+    openFile(`/api/applications/${applicationId}/documents/${documentId}`),
 
-  academic: () =>
-    request<{ categories: string[] }>("/api/academic"),
+  classAttendance: (classId: string) =>
+    request<ClassAttendance>(`/api/attendance/class/${encodeURIComponent(classId)}`),
 
-  /** Opens the uploaded letter in a new tab (the request needs the login token). */
-  openDocument: async (id: string) => {
-    const tab = window.open("", "_blank");
-    const token = tokenStore.get();
-    const response = await fetch(`/api/applications/${id}/document`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+  resetPassword: (prn: string) =>
+    request<{ prn: string; name: string; password: string }>(
+      `/api/students/${encodeURIComponent(prn)}/reset-password`,
+      { method: "POST" }
+    ),
 
-    if (!response.ok) {
-      tab?.close();
-      const data = await response.json().catch(() => ({}));
-      throw new ApiError(
-        response.status,
-        (data as { error?: string }).error ?? "Couldn't open the document."
-      );
-    }
+  /** Creates new starting passwords for students who haven't logged in yet, and downloads them. */
+  downloadPasswords: (classId: string) =>
+    downloadFile(
+      `/api/reports/passwords/${encodeURIComponent(classId)}`,
+      `starting_passwords_${classId}.xlsx`,
+      "POST"
+    ),
 
-    const url = URL.createObjectURL(await response.blob());
-    if (tab) tab.location.href = url;
-    else window.location.href = url;
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  },
+  downloadSummary: (classId: string) =>
+    downloadFile(
+      `/api/reports/summary/${encodeURIComponent(classId)}`,
+      `attendance_summary_${classId}.xlsx`
+    ),
 };

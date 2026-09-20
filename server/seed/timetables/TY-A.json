@@ -1,0 +1,357 @@
+{
+  "class": "TY-A",
+  "wef": "2026-06-15",
+  "slotTimes": {
+    "1": [
+      "10:00",
+      "10:55"
+    ],
+    "2": [
+      "10:55",
+      "11:50"
+    ],
+    "3": [
+      "12:30",
+      "13:30"
+    ],
+    "4": [
+      "13:30",
+      "14:30"
+    ],
+    "5": [
+      "14:50",
+      "15:50"
+    ],
+    "6": [
+      "15:50",
+      "16:50"
+    ]
+  },
+  "courses": [
+    {
+      "id": "IPR",
+      "code": "24UCSMD301",
+      "name": "IPR and EDP",
+      "faculty": "Mr. Arya",
+      "counted": true
+    },
+    {
+      "id": "MC5",
+      "code": "24UCSMC301",
+      "name": "Mandatory Course: V (Internship)",
+      "faculty": "Ms. Sapna Malviya",
+      "counted": true
+    },
+    {
+      "id": "OE3",
+      "code": "24UCSOEXXX",
+      "name": "Open Elective-3",
+      "faculty": "Mr. Siddhesh Brahmane",
+      "counted": true
+    },
+    {
+      "id": "PE1",
+      "code": "24UCSPEXXX-1",
+      "name": "Professional Elective-1: Prompt Engineering",
+      "faculty": "Mr. Arya",
+      "counted": true
+    },
+    {
+      "id": "PE2",
+      "code": "24UCSPEXXX-2",
+      "name": "Professional Elective-2: Advanced DB",
+      "faculty": "Mr. Anuj Joshi",
+      "counted": true
+    },
+    {
+      "id": "CIS",
+      "code": "24UCSPC301",
+      "name": "Cryptography and Information Security",
+      "faculty": "Dr. Venkat Reddy / Dr. M.B. Gawali",
+      "counted": true
+    },
+    {
+      "id": "FED",
+      "code": "24UCSPC302",
+      "name": "Frontend Development using Angular (HCL)",
+      "faculty": "Mr. Siddhesh / Ms. Sapna Malviya",
+      "counted": true
+    },
+    {
+      "id": "WS",
+      "code": "24UCSPC303",
+      "name": "Web Services (HCL)",
+      "faculty": "Mr. Poul / Dr. Venkat Reddy",
+      "counted": true
+    },
+    {
+      "id": "Training & Placement",
+      "name": "Training & Placement",
+      "counted": false
+    },
+    {
+      "id": "LinkedIn",
+      "name": "LinkedIn",
+      "counted": false
+    },
+    {
+      "id": "HCL Tech",
+      "name": "HCL Tech",
+      "counted": false
+    },
+    {
+      "id": "Sports",
+      "name": "Sports",
+      "counted": false
+    },
+    {
+      "id": "Library",
+      "name": "Library",
+      "counted": false
+    },
+    {
+      "id": "Mentor Mentee",
+      "name": "Mentor Mentee",
+      "counted": false
+    }
+  ],
+  "blocks": [
+    {
+      "day": "MON",
+      "slots": [
+        1
+      ],
+      "course": "CIS",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        2
+      ],
+      "course": "PE1",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "Training & Placement",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        5
+      ],
+      "course": "LinkedIn",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        6
+      ],
+      "course": "PE2",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        1
+      ],
+      "course": "FED",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        2
+      ],
+      "course": "PE2",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        3
+      ],
+      "course": "PE1",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        4
+      ],
+      "course": "PE2",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "IPR",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        1
+      ],
+      "course": "PE1",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        2
+      ],
+      "course": "WS",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        3
+      ],
+      "course": "HCL Tech",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        4
+      ],
+      "course": "CIS",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "CIS",
+      "type": "LAB",
+      "room": "304"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        1
+      ],
+      "course": "FED",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        2
+      ],
+      "course": "WS",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "LinkedIn",
+      "type": "TH"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "WS",
+      "type": "LAB",
+      "room": "304"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "IPR",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "FED",
+      "type": "LAB",
+      "room": "304"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "Sports",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "Mentor Mentee",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "MC5",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        5
+      ],
+      "course": "Library",
+      "type": "TH"
+    }
+  ],
+  "notes": [
+    "Both professional electives share course code 24UCSPEXXX, so they are stored as -1 and -2.",
+    "Open Elective-3 has no slot in the time table grid.",
+    "Saturday period 6 is empty."
+  ]
+}

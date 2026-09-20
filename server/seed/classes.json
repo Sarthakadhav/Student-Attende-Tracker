@@ -1,0 +1,62 @@
+[
+  {
+    "id": "FY",
+    "label": "First Year B.Tech CSE",
+    "year": "FY",
+    "division": "A",
+    "calendar": "MISSING-FY-CALENDAR",
+    "timetable": "FY",
+    "coordinator": "Dr. Manju Sharma",
+    "rooms": "107/306"
+  },
+  {
+    "id": "SY-A",
+    "label": "Second Year CSE, Division A",
+    "year": "SY",
+    "division": "A",
+    "calendar": "REGULAR-2026-ODD",
+    "timetable": "SY-A",
+    "coordinator": "Mr. Arya Abhishek",
+    "rooms": "304/106"
+  },
+  {
+    "id": "SY-B",
+    "label": "Second Year CSE, Division B (DSY)",
+    "year": "SY",
+    "division": "B",
+    "calendar": "DSY-2026-ODD",
+    "timetable": "SY-B",
+    "coordinator": "Mr. Siddesh Bramhane",
+    "rooms": "103"
+  },
+  {
+    "id": "TY-A",
+    "label": "Third Year CSE, Division A",
+    "year": "TY",
+    "division": "A",
+    "calendar": "REGULAR-2026-ODD",
+    "timetable": "TY-A",
+    "coordinator": "Ms. Sapna Malviya",
+    "rooms": "106/304"
+  },
+  {
+    "id": "TY-B",
+    "label": "Third Year CSE, Division B",
+    "year": "TY",
+    "division": "B",
+    "calendar": "REGULAR-2026-ODD",
+    "timetable": null,
+    "coordinator": null,
+    "rooms": null
+  },
+  {
+    "id": "BTECH",
+    "label": "Final Year B.Tech CSE",
+    "year": "BTech",
+    "division": "A",
+    "calendar": "REGULAR-2026-ODD",
+    "timetable": null,
+    "coordinator": null,
+    "rooms": null
+  }
+]

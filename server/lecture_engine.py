@@ -163,3 +163,39 @@ def final_attendance(erp_attended: int, erp_total: int, missed: int) -> dict:
         "erpPercent": round(erp_attended / erp_total * 100, 2),
         "finalPercent": round((erp_attended + credit) / erp_total * 100, 2),
     }
+
+
+def _range_end(entry) -> str:
+    return entry.get("to") or entry["date"]
+
+
+def phases_for(class_id: str) -> list[dict]:
+    """
+    Splits the semester at the CIA exams, so event attendance can be reported
+    "till CIA-1", "CIA-1 to CIA-2" and (if lectures continue) "after CIA-2".
+    """
+    cal = calendar_for(class_id)
+    cia = {n["name"]: _range_end(n) for n in cal["noLectures"] if n["name"] in ("CIA-1", "CIA-2")}
+    start, end = cal["semesterStart"], cal["semesterEnd"]
+    phases = []
+    cursor = start
+    if "CIA-1" in cia:
+        phases.append({"key": "P1", "label": "Till CIA-1", "start": cursor, "end": cia["CIA-1"]})
+        cursor = (date.fromisoformat(cia["CIA-1"]) + timedelta(days=1)).isoformat()
+    if "CIA-2" in cia and cia["CIA-2"] <= end:
+        phases.append({"key": "P2", "label": "CIA-1 to CIA-2", "start": cursor, "end": cia["CIA-2"]})
+        cursor = (date.fromisoformat(cia["CIA-2"]) + timedelta(days=1)).isoformat()
+        if cursor <= end:
+            phases.append({"key": "P3", "label": "After CIA-2", "start": cursor, "end": end})
+    else:
+        # CIA-2 after the last teaching day (e.g. DSY) still reads as "CIA-1 to CIA-2"
+        label = ("CIA-1 to CIA-2" if "CIA-2" in cia else "After CIA-1") if "CIA-1" in cia else "Whole semester"
+        phases.append({"key": f"P{len(phases) + 1}", "label": label, "start": cursor, "end": end})
+    return phases
+
+
+def phase_key(phases: list[dict], iso_date: str) -> str | None:
+    for p in phases:
+        if p["start"] <= iso_date <= p["end"]:
+            return p["key"]
+    return None

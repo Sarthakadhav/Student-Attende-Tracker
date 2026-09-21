@@ -1,13 +1,16 @@
 import type {
   Academic,
   AuthResponse,
-  CircularRow,
-  ClassAttendance,
   ClassInfo,
-  ErpCourse,
+  ErpImport,
+  EventReport,
+  FinalReport,
   LeaveApplication,
   Lecture,
+  Phase,
   SkippedDay,
+  StudentListItem,
+  SubjectSummary,
   User,
 } from "./types";
 
@@ -29,7 +32,7 @@ export class ApiError extends Error {
 }
 
 type RequestOptions = {
-  method?: "GET" | "POST" | "PATCH" | "PUT";
+  method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
 };
 
@@ -112,8 +115,24 @@ export type FacultySignup = {
 export type PreviewResult = {
   lectures: Lecture[];
   skipped: SkippedDay[];
-  rows: CircularRow[];
+  subjects: SubjectSummary[];
+  phases: Phase[];
   counted: boolean;
+};
+
+export type Calculation = {
+  counted: boolean;
+  phases: Phase[];
+  subjects: SubjectSummary[];
+};
+
+export type ErpImportResult = {
+  importId: string;
+  replaced: boolean;
+  students: number;
+  subjects: number;
+  unknownPrns: string[];
+  missingStudents: number;
 };
 
 export const api = {
@@ -135,17 +154,6 @@ export const api = {
 
   academic: () => request<Academic>("/api/academic"),
 
-  erp: () => request<{ ready: boolean; courses: ErpCourse[] }>("/api/erp-attendance"),
-
-  saveErp: (entries: { courseId: string; attended: number; total: number }[]) =>
-    request<{ ready: boolean; courses: ErpCourse[] }>("/api/erp-attendance", {
-      method: "PUT",
-      body: { entries },
-    }),
-
-  myAttendance: () =>
-    request<{ ready: boolean; rows: CircularRow[]; threshold: number }>("/api/attendance"),
-
   preview: (startDate: string, endDate: string, kind: string) =>
     request<PreviewResult>("/api/applications/preview", {
       method: "POST",
@@ -160,8 +168,7 @@ export const api = {
       classId ? `/api/applications?classId=${encodeURIComponent(classId)}` : "/api/applications"
     ),
 
-  calculation: (id: string) =>
-    request<{ counted: boolean; rows: CircularRow[] }>(`/api/applications/${id}/calculation`),
+  calculation: (id: string) => request<Calculation>(`/api/applications/${id}/calculation`),
 
   markRead: (id: string) =>
     request<{ application: LeaveApplication }>(`/api/applications/${id}/read`, { method: "PATCH" }),
@@ -175,8 +182,8 @@ export const api = {
   openDocument: (applicationId: string, documentId: string) =>
     openFile(`/api/applications/${applicationId}/documents/${documentId}`),
 
-  classAttendance: (classId: string) =>
-    request<ClassAttendance>(`/api/attendance/class/${encodeURIComponent(classId)}`),
+  students: (classId: string) =>
+    request<{ students: StudentListItem[] }>(`/api/students/${encodeURIComponent(classId)}`),
 
   resetPassword: (prn: string) =>
     request<{ prn: string; name: string; password: string }>(
@@ -192,9 +199,39 @@ export const api = {
       "POST"
     ),
 
-  downloadSummary: (classId: string) =>
+  // ERP attendance import (class coordinator)
+  downloadErpTemplate: (classId: string) =>
+    downloadFile(`/api/erp/template/${encodeURIComponent(classId)}`, `ERP_attendance_template_${classId}.xlsx`),
+
+  importErp: (classId: string, form: FormData) =>
+    request<ErpImportResult>(`/api/erp/import/${encodeURIComponent(classId)}`, { method: "POST", body: form }),
+
+  erpImports: (classId: string) =>
+    request<{ imports: ErpImport[] }>(`/api/erp/imports/${encodeURIComponent(classId)}`),
+
+  deleteErpImport: (id: string) => request<{ deleted: boolean }>(`/api/erp/imports/${id}`, { method: "DELETE" }),
+
+  // Report 1: event attendance
+  eventReport: (classId: string) => request<EventReport>(`/api/reports/event/${encodeURIComponent(classId)}`),
+
+  downloadEventReport: (classId: string) =>
+    downloadFile(`/api/reports/event/${encodeURIComponent(classId)}/xlsx`, `Event_attendance_${classId}.xlsx`),
+
+  // Report 2: final attendance (ERP + events)
+  finalReport: (classId: string, importId?: string) =>
+    request<FinalReport>(
+      `/api/reports/final/${encodeURIComponent(classId)}${importId ? `?importId=${importId}` : ""}`
+    ),
+
+  downloadFinalReport: (classId: string, importId?: string) =>
     downloadFile(
-      `/api/reports/summary/${encodeURIComponent(classId)}`,
-      `attendance_summary_${classId}.xlsx`
+      `/api/reports/final/${encodeURIComponent(classId)}/xlsx${importId ? `?importId=${importId}` : ""}`,
+      `Final_attendance_${classId}.xlsx`
+    ),
+
+  downloadDetentionList: (classId: string, importId?: string) =>
+    downloadFile(
+      `/api/reports/final/${encodeURIComponent(classId)}/detention-list${importId ? `?importId=${importId}` : ""}`,
+      `Detention_List_${classId}.docx`
     ),
 };

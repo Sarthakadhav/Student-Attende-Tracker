@@ -5,11 +5,10 @@ import { api } from "../api";
 import type { PreviewResult } from "../api";
 import type { Academic, ApplicationKind, LeaveApplication as Application } from "../types";
 import { formatDate, formatFileSize, formatRange } from "../utils/format";
-import CircularTable from "./CircularTable";
+import SubjectTable from "./SubjectTable";
 
 interface LeaveApplicationProps {
   onBack: () => void;
-  onOpenErp: () => void;
   onSubmitted: () => void;
 }
 
@@ -18,7 +17,7 @@ type Preview = PreviewResult & { key: string; error: string };
 const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_SIZE = 5 * 1024 * 1024;
 
-const LeaveApplication = ({ onBack, onOpenErp, onSubmitted }: LeaveApplicationProps) => {
+const LeaveApplication = ({ onBack, onSubmitted }: LeaveApplicationProps) => {
   const [academic, setAcademic] = useState<Academic | null>(null);
   const [kind, setKind] = useState<ApplicationKind>("event");
   const [category, setCategory] = useState("");
@@ -37,7 +36,6 @@ const LeaveApplication = ({ onBack, onOpenErp, onSubmitted }: LeaveApplicationPr
   const datesReady = Boolean(startDate && endDate && endDate >= startDate);
   const previewKey = `${startDate}|${endDate}|${kind}`;
   const current = datesReady && preview?.key === previewKey ? preview : null;
-  const missingErp = current?.rows.filter((r) => r.attended === null) ?? [];
 
   useEffect(() => {
     api
@@ -57,7 +55,7 @@ const LeaveApplication = ({ onBack, onOpenErp, onSubmitted }: LeaveApplicationPr
       .catch(
         (err: Error) =>
           !cancelled &&
-          setPreview({ key, lectures: [], skipped: [], rows: [], counted: false, error: err.message })
+          setPreview({ key, lectures: [], skipped: [], subjects: [], phases: [], counted: false, error: err.message })
       );
 
     return () => {
@@ -96,10 +94,6 @@ const LeaveApplication = ({ onBack, onOpenErp, onSubmitted }: LeaveApplicationPr
       }
       if (!approvalLetter) {
         setError("Upload the pre-approval letter for the event.");
-        return;
-      }
-      if (missingErp.length > 0) {
-        setError("Enter your ERP attendance for the subjects marked below first.");
         return;
       }
     }
@@ -190,7 +184,7 @@ const LeaveApplication = ({ onBack, onOpenErp, onSubmitted }: LeaveApplicationPr
       <div className="leave-page-heading">
         <div>
           <h1>Apply for attendance</h1>
-          <p>For lectures missed because of an approved event. You'll see your final attendance before you submit.</p>
+          <p>For lectures missed because of an approved event. Your class coordinator adds them to your attendance once approved.</p>
         </div>
         <button className="secondary-button" onClick={onBack}>
           <X size={16} />
@@ -348,8 +342,8 @@ const LeaveApplication = ({ onBack, onOpenErp, onSubmitted }: LeaveApplicationPr
 
         <div className="preview-card">
           <div className="section-heading">
-            <h2>{kind === "event" ? "Your attendance if approved" : "Lectures during this period"}</h2>
-            <p>Worked out from your time table and the academic calendar. Labs count as 1 session.</p>
+            <h2>Lectures you missed</h2>
+            <p>From your time table and the academic calendar, split by CIA. Labs count as 1 session.</p>
           </div>
 
           {!datesReady ? (
@@ -362,25 +356,7 @@ const LeaveApplication = ({ onBack, onOpenErp, onSubmitted }: LeaveApplicationPr
             <p className="preview-empty">No lectures fall on these dates.</p>
           ) : (
             <>
-              <CircularTable
-                rows={current.rows}
-                threshold={academic?.threshold ?? 75}
-                mode="application"
-                counted={current.counted}
-              />
-
-              {kind === "event" && missingErp.length > 0 && (
-                <div className="info-note warning-note">
-                  <AlertCircle size={17} />
-                  <span>
-                    Enter your ERP attendance for {missingErp.map((r) => r.subjectName).join(", ")} before
-                    submitting.{" "}
-                    <button type="button" className="link-button" onClick={onOpenErp}>
-                      Enter ERP attendance
-                    </button>
-                  </span>
-                </div>
-              )}
+              <SubjectTable subjects={current.subjects} phases={current.phases} />
 
               {current.skipped.length > 0 && (
                 <p className="preview-skipped">

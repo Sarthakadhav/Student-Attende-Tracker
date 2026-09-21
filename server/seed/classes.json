@@ -45,9 +45,9 @@
     "year": "TY",
     "division": "B",
     "calendar": "REGULAR-2026-ODD",
-    "timetable": null,
-    "coordinator": null,
-    "rooms": null
+    "timetable": "TY-B",
+    "coordinator": "Dr. Venkat Reddy",
+    "rooms": "306/107"
   },
   {
     "id": "BTECH",

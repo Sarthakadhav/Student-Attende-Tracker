@@ -1,21 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { ClipboardList, FilePlus2, FileText, LayoutDashboard, ListChecks } from "lucide-react";
+import { FilePlus2, FileText, LayoutDashboard, ListChecks } from "lucide-react";
 import { api } from "../api";
-import CircularTable from "../components/CircularTable";
-import ErpAttendanceForm from "../components/ErpAttendanceForm";
 import Header from "../components/Header";
 import LeaveApplication from "../components/LeaveApplication";
 import Sidebar from "../components/Sidebar";
 import type { NavItem } from "../components/Sidebar";
 import StatusBadge from "../components/StatusBadge";
-import type { CircularRow, LeaveApplication as Application, User } from "../types";
+import type { LeaveApplication as Application, User } from "../types";
 import { formatRange, timeAgo } from "../utils/format";
 
-type Page = "dashboard" | "erp" | "apply" | "applications";
+type Page = "dashboard" | "apply" | "applications";
 
 const NAV: NavItem<Page>[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "erp", label: "My ERP attendance", icon: ClipboardList },
   { key: "apply", label: "Apply for attendance", icon: FilePlus2 },
   { key: "applications", label: "My applications", icon: ListChecks },
 ];
@@ -29,20 +26,15 @@ const StudentDashboard = ({ user, onLogout }: StudentDashboardProps) => {
   const [page, setPage] = useState<Page>("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
   const [applications, setApplications] = useState<Application[]>([]);
-  const [rows, setRows] = useState<CircularRow[]>([]);
-  const [ready, setReady] = useState(true);
-  const [threshold, setThreshold] = useState(75);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(
     () =>
-      Promise.all([api.applications(), api.myAttendance()])
-        .then(([apps, att]) => {
-          setApplications(apps.applications);
-          setRows(att.rows);
-          setReady(att.ready);
-          setThreshold(att.threshold);
+      api
+        .applications()
+        .then((data) => {
+          setApplications(data.applications);
           setError("");
         })
         .catch((err: Error) => setError(err.message))
@@ -54,12 +46,11 @@ const StudentDashboard = ({ user, onLogout }: StudentDashboardProps) => {
     load();
   }, [load]);
 
-  const entered = rows.filter((r) => r.total !== null);
-  const below = entered.filter((r) => (r.finalPercent ?? 0) < threshold);
   // Names in the class list are in capitals, sometimes surname first, so show the full name.
-  const displayName = user.name
-    .toLowerCase()
-    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+  const displayName = user.name.toLowerCase().replace(/\b\w/g, (ch) => ch.toUpperCase());
+  const events = applications.filter((a) => a.kind === "event");
+  const approvedSessions = events.filter((a) => a.status === "approved").reduce((n, a) => n + a.sessions, 0);
+  const waiting = applications.filter((a) => a.status === "pending").length;
 
   return (
     <div className="app">
@@ -88,15 +79,9 @@ const StudentDashboard = ({ user, onLogout }: StudentDashboardProps) => {
           {error && <div className="page-error">{error}</div>}
 
           {page === "apply" ? (
-            <LeaveApplication
-              onBack={() => setPage("dashboard")}
-              onOpenErp={() => setPage("erp")}
-              onSubmitted={load}
-            />
-          ) : page === "erp" ? (
-            <ErpAttendanceForm onSaved={load} />
+            <LeaveApplication onBack={() => setPage("dashboard")} onSubmitted={load} />
           ) : loading ? (
-            <p className="page-loading">Loading your attendance…</p>
+            <p className="page-loading">Loading…</p>
           ) : page === "applications" ? (
             <ApplicationList applications={applications} onApply={() => setPage("apply")} />
           ) : (
@@ -115,55 +100,29 @@ const StudentDashboard = ({ user, onLogout }: StudentDashboardProps) => {
                 </button>
               </section>
 
-              {!ready ? (
-                <div className="empty-state">
-                  <p>
-                    Your class's time table hasn't been added to the system yet, so attendance can't be
-                    calculated. Contact your class coordinator.
-                  </p>
+              <section className="stat-row">
+                <div className="stat-card">
+                  <span>Approved event sessions</span>
+                  <strong>{approvedSessions}</strong>
+                  <p>Added to your attendance by your class coordinator.</p>
                 </div>
-              ) : (
-                <section className="student-section">
-                  <div className="section-heading section-heading-row">
-                    <div>
-                      <h2>My attendance</h2>
-                      <p>
-                        ERP attendance plus approved event lectures, as per the Registrar's circular. You
-                        need {threshold}% in every subject.
-                      </p>
-                    </div>
-                    {entered.length > 0 && (
-                      <div className={`overall-figure ${below.length ? "text-warning" : "text-good"}`}>
-                        <strong>{below.length}</strong>
-                        <span>subject{below.length === 1 ? "" : "s"} below {threshold}%</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {entered.length === 0 ? (
-                    <div className="empty-state">
-                      <p>Enter your ERP attendance first. The table fills in from there.</p>
-                      <button className="secondary-button" onClick={() => setPage("erp")}>
-                        Enter ERP attendance
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="table-card">
-                      <CircularTable rows={rows} threshold={threshold} mode="overall" />
-                    </div>
-                  )}
-                </section>
-              )}
+                <div className="stat-card">
+                  <span>Waiting for review</span>
+                  <strong>{waiting}</strong>
+                  <p>Application{waiting === 1 ? "" : "s"} your coordinator hasn't checked yet.</p>
+                </div>
+                <div className="stat-card">
+                  <span>Applications</span>
+                  <strong>{applications.length}</strong>
+                  <p>Submitted this semester.</p>
+                </div>
+              </section>
 
               <section className="student-section">
                 <div className="section-heading">
                   <h2>Recent applications</h2>
                 </div>
-                <ApplicationList
-                  applications={applications.slice(0, 3)}
-                  onApply={() => setPage("apply")}
-                  compact
-                />
+                <ApplicationList applications={applications.slice(0, 5)} onApply={() => setPage("apply")} compact />
               </section>
             </>
           )}
@@ -212,9 +171,7 @@ function ApplicationList({ applications, onApply, compact = false }: Application
               <span>
                 {formatRange(a.startDate, a.endDate)}, {a.sessions} session{a.sessions === 1 ? "" : "s"}
               </span>
-              {a.remark && (
-                <p className={`application-remark remark-${a.status}`}>Coordinator: {a.remark}</p>
-              )}
+              {a.remark && <p className={`application-remark remark-${a.status}`}>Coordinator: {a.remark}</p>}
             </div>
             <div className="application-row-side">
               <StatusBadge status={a.status} />

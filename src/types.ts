@@ -30,16 +30,6 @@ export type Course = {
   faculty: string;
 };
 
-export type ErpCourse = {
-  courseId: string;
-  code: string;
-  name: string;
-  faculty: string;
-  attended: number | null;
-  total: number | null;
-  updatedAt: string | null;
-};
-
 export type Lecture = {
   date: string;
   courseId: string;
@@ -54,23 +44,6 @@ export type Lecture = {
 export type SkippedDay = {
   date: string;
   reason: string;
-};
-
-/** One row of the circular's table (step 6.a). */
-export type CircularRow = {
-  courseId: string;
-  subjectCode: string;
-  subjectName: string;
-  attended: number | null;
-  total: number | null;
-  durations: [string, string][];
-  approvedMissed: number;
-  pendingMissed: number;
-  thisMissed: number;
-  credit: number | null;
-  erpPercent: number | null;
-  finalPercent: number | null;
-  applicationSessions?: number;
 };
 
 export type ApplicationStatus = "pending" | "approved" | "rejected";
@@ -125,11 +98,79 @@ export type Academic = {
   semester?: { start: string; end: string };
 };
 
-export type ClassAttendance = {
-  ready: boolean;
+export type Phase = {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+};
+
+/** Sessions per subject for one application, split by CIA phase. */
+export type SubjectSummary = {
+  courseId: string;
+  subjectCode: string;
+  subjectName: string;
+  sessions: number;
+  byPhase: Record<string, number>;
+};
+
+export type StudentListItem = StudentInfo & { id: string; activated: boolean };
+
+export type ErpImport = {
+  id: string;
+  label: string;
+  asOf: string;
+  fileName: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  students: number;
+};
+
+export type EventReport = {
   courses: Course[];
-  students: { student: StudentInfo & { id: string }; rows: CircularRow[] }[];
+  phases: Phase[];
+  students: {
+    student: StudentInfo & { id: string };
+    perCourse: Record<string, Record<string, number>>;
+    byPhase: Record<string, number>;
+    total: number;
+    approvedApplications: number;
+    pendingApplications: number;
+  }[];
+};
+
+export type FinalSubject = {
+  courseId: string;
+  subjectCode: string;
+  subjectName: string;
+  attended: number;
+  total: number;
+  erpPercent: number;
+  eventSessions: number;
+  credit: number;
+  finalPercent: number;
+};
+
+export type FinalStatus = "detained" | "subject" | "clear" | "missing";
+
+export type FinalReport = {
+  import: ErpImport;
+  imports: ErpImport[];
+  courses: Course[];
   threshold: number;
+  counts: Record<"detained" | "subject" | "clear" | "missing", number>;
+  students: {
+    student: StudentInfo & { id: string };
+    subjects: FinalSubject[];
+    erpPercent: number | null;
+    finalPercent: number | null;
+    credit: number;
+    below: string[];
+    erpBelow: string[];
+    status: string;
+    statusKey: FinalStatus;
+    savedByEvents?: boolean;
+  }[];
 };
 
 export type AuthResponse = {

@@ -1,40 +1,54 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode, SubmitEvent } from "react";
 import {
   ArrowLeft,
+  BarChart3,
   BookOpen,
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Clock3,
   Download,
+  FileSpreadsheet,
   FileText,
   KeyRound,
   LayoutDashboard,
+  Trash2,
+  Upload,
+  Users,
   X,
 } from "lucide-react";
 import { api } from "../api";
-import CircularTable from "../components/CircularTable";
+import type { Calculation, ErpImportResult } from "../api";
 import Header from "../components/Header";
 import Sidebar from "../components/Sidebar";
 import type { NavItem } from "../components/Sidebar";
 import StatusBadge from "../components/StatusBadge";
+import SubjectTable from "../components/SubjectTable";
 import type {
   ApplicationStatus,
-  CircularRow,
-  ClassAttendance,
   ClassInfo,
+  ErpImport,
+  EventReport,
+  FinalReport,
+  FinalStatus,
   LeaveApplication,
+  StudentListItem,
   User,
 } from "../types";
 import { formatDate, formatFileSize, formatRange, formatTime, initials, timeAgo } from "../utils/format";
 import "./Faculty.css";
 
-type Page = "dashboard" | "attendance" | "application";
+type Page = "dashboard" | "erp" | "event" | "final" | "students" | "application";
 
 const NAV: NavItem<Exclude<Page, "application">>[] = [
   { key: "dashboard", label: "Applications", icon: LayoutDashboard },
-  { key: "attendance", label: "Class attendance", icon: ClipboardCheck },
+  { key: "erp", label: "ERP attendance", icon: Upload },
+  { key: "event", label: "Event attendance report", icon: BarChart3 },
+  { key: "final", label: "Final attendance report", icon: ClipboardCheck },
+  { key: "students", label: "Students", icon: Users },
 ];
 
 const EVIDENCE_LABEL: Record<string, string> = {
@@ -54,7 +68,8 @@ type FacultyProps = {
 
 function Faculty({ user, onLogout }: FacultyProps) {
   const [classes, setClasses] = useState<ClassInfo[]>([]);
-  const [classId, setClassId] = useState("");
+  const [filterClass, setFilterClass] = useState("");
+  const [reportClass, setReportClass] = useState("");
   const [applications, setApplications] = useState<LeaveApplication[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<Page>("dashboard");
@@ -76,14 +91,14 @@ function Faculty({ user, onLogout }: FacultyProps) {
   const loadApplications = useCallback(
     () =>
       api
-        .applications(classId || undefined)
+        .applications(filterClass || undefined)
         .then((data) => {
           setApplications(data.applications);
           setError("");
         })
         .catch((err: Error) => setError(err.message))
         .finally(() => setLoading(false)),
-    [classId]
+    [filterClass]
   );
 
   useEffect(() => {
@@ -111,13 +126,15 @@ function Faculty({ user, onLogout }: FacultyProps) {
 
   const selected = applications.find((a) => a.id === selectedId) ?? null;
   const scope = user.classes?.length ? user.classes.join(", ") : "All classes";
+  const classId = reportClass || classes[0]?.id || "";
+  const classPicker = <ClassSelect classes={classes} value={classId} onChange={setReportClass} />;
 
   return (
     <div className="app">
       <Sidebar
         portalName="Faculty portal"
         items={NAV}
-        active={activePage === "attendance" ? "attendance" : "dashboard"}
+        active={activePage === "application" ? "dashboard" : activePage}
         onNavigate={(key) => {
           setSelectedId(null);
           setActivePage(key);
@@ -142,16 +159,22 @@ function Faculty({ user, onLogout }: FacultyProps) {
         <div className="content">
           {error && <div className="page-error">{error}</div>}
 
-          {activePage === "attendance" ? (
-            <ClassAttendancePage classes={classes} onBack={goToDashboard} />
+          {activePage === "erp" ? (
+            <ErpPage key={classId} classId={classId} classPicker={classPicker} />
+          ) : activePage === "event" ? (
+            <EventReportPage key={classId} classId={classId} classPicker={classPicker} />
+          ) : activePage === "final" ? (
+            <FinalReportPage key={classId} classId={classId} classPicker={classPicker} onGoToErp={() => setActivePage("erp")} />
+          ) : activePage === "students" ? (
+            <StudentsPage key={classId} classId={classId} classPicker={classPicker} />
           ) : activePage === "application" && selected ? (
             <ApplicationDetails key={selected.id} application={selected} onBack={goToDashboard} onReviewed={replaceApplication} />
           ) : (
             <Dashboard
               name={user.name}
               classes={classes}
-              classId={classId}
-              onClassChange={setClassId}
+              classId={filterClass}
+              onClassChange={setFilterClass}
               applications={applications}
               loading={loading}
               onOpen={openApplication}
@@ -163,6 +186,55 @@ function Faculty({ user, onLogout }: FacultyProps) {
     </div>
   );
 }
+
+/* =========================================
+   SHARED PIECES
+========================================= */
+
+function ClassSelect({ classes, value, onChange }: { classes: ClassInfo[]; value: string; onChange: (id: string) => void }) {
+  if (classes.length <= 1) {
+    return <span className="class-pill">{classes[0]?.id ?? "No class"}: {classes[0]?.label}</span>;
+  }
+  return (
+    <select className="toolbar-select" value={value} onChange={(e) => onChange(e.target.value)} aria-label="Class">
+      {classes.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.id}: {c.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function PageHeading({ title, text, children }: { title: string; text: string; children?: ReactNode }) {
+  return (
+    <div className="application-heading application-heading-row">
+      <div>
+        <h1>{title}</h1>
+        <p>{text}</p>
+      </div>
+      {children && <div className="toolbar">{children}</div>}
+    </div>
+  );
+}
+
+function useDownload(setError: (message: string) => void) {
+  const [busy, setBusy] = useState("");
+  const run = async (name: string, action: () => Promise<void>) => {
+    setBusy(name);
+    setError("");
+    try {
+      await action();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy("");
+    }
+  };
+  return { busy, run };
+}
+
+const pctText = (n: number | null | undefined) => (n === null || n === undefined ? "-" : `${n}%`);
 
 /* =========================================
    DASHBOARD
@@ -279,119 +351,664 @@ function Dashboard({ name, classes, classId, onClassChange, applications, loadin
 }
 
 /* =========================================
-   CLASS ATTENDANCE
+   ERP ATTENDANCE IMPORT
 ========================================= */
 
-type ClassAttendancePageProps = {
-  classes: ClassInfo[];
-  onBack: () => void;
-};
+const LABEL_SUGGESTIONS = ["Till CIA-1", "Till CIA-2", "Detention list"];
 
-function ClassAttendancePage({ classes, onBack }: ClassAttendancePageProps) {
-  const [classId, setClassId] = useState("");
-  const [data, setData] = useState<ClassAttendance | null>(null);
-  const [courseId, setCourseId] = useState("");
-  const [search, setSearch] = useState("");
-  const [onlyRisk, setOnlyRisk] = useState(false);
+function ErpPage({ classId, classPicker }: { classId: string; classPicker: ReactNode }) {
+  const [imports, setImports] = useState<ErpImport[]>([]);
+  const [label, setLabel] = useState("Till CIA-1");
+  const [asOf, setAsOf] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<ErpImportResult | null>(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [downloading, setDownloading] = useState(false);
+  const { busy, run } = useDownload(setError);
 
-  const activeClass = classId || classes[0]?.id || "";
+  const load = useCallback(
+    () =>
+      classId
+        ? api
+            .erpImports(classId)
+            .then((d) => setImports(d.imports))
+            .catch((err: Error) => setError(err.message))
+        : Promise.resolve(),
+    [classId]
+  );
 
   useEffect(() => {
-    if (!activeClass) return;
+    load();
+  }, [load]);
+
+  const upload = async (e: SubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError("");
+    setResult(null);
+    if (label.trim().length < 2) return setError("Give this upload a name, e.g. Till CIA-1.");
+    if (!asOf) return setError("Enter the date the ERP figures were taken on.");
+    if (!file) return setError("Choose the filled ERP attendance file.");
+    const form = new FormData();
+    form.append("label", label.trim());
+    form.append("asOf", asOf);
+    form.append("file", file);
+    setSaving(true);
+    try {
+      setResult(await api.importErp(classId, form));
+      setFile(null);
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (item: ErpImport) => {
+    if (!window.confirm(`Delete the ERP upload "${item.label}"? Reports based on it will change.`)) return;
+    try {
+      await api.deleteErpImport(item.id);
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  return (
+    <section className="attendance-page">
+      <PageHeading
+        title="ERP attendance"
+        text="Import the attended and total sessions of every student from ERP. The final attendance report merges these with approved event sessions."
+      >
+        {classPicker}
+      </PageHeading>
+
+      {error && <div className="page-error">{error}</div>}
+      {result && (
+        <div className="form-success" role="status">
+          <Check size={17} />
+          <span>
+            Imported {result.students} students across {result.subjects} subjects
+            {result.replaced ? ", replacing the earlier upload with this name" : ""}.
+            {result.missingStudents > 0 && ` ${result.missingStudents} student(s) of the class weren't in the file.`}
+            {result.unknownPrns.length > 0 && ` Ignored PRNs not in ${classId}: ${result.unknownPrns.join(", ")}.`}
+          </span>
+        </div>
+      )}
+
+      <div className="erp-steps">
+        <div className="info-card">
+          <div className="card-title">
+            <div className="card-icon">1</div>
+            <div>
+              <h2>Download the template</h2>
+              <p>An Excel sheet with every student and subject of {classId}. Fill it from ERP.</p>
+            </div>
+          </div>
+          <button
+            className="secondary-button"
+            onClick={() => run("template", () => api.downloadErpTemplate(classId))}
+            disabled={!classId || busy === "template"}
+          >
+            <FileSpreadsheet size={16} />
+            {busy === "template" ? "Preparing…" : "Download template"}
+          </button>
+          <p className="field-hint">
+            For each subject, fill <strong>Attended</strong> and <strong>Total</strong> sessions. Leave both empty if a subject
+            doesn't apply to a student.
+          </p>
+        </div>
+
+        <form className="info-card" onSubmit={upload} noValidate>
+          <div className="card-title">
+            <div className="card-icon">2</div>
+            <div>
+              <h2>Upload the filled file</h2>
+              <p>Uploading again with the same name replaces the earlier one.</p>
+            </div>
+          </div>
+
+          <div className="form-grid">
+            <div className="form-group">
+              <label htmlFor="erpLabel">Name</label>
+              <input id="erpLabel" list="erp-labels" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={40} />
+              <datalist id="erp-labels">
+                {LABEL_SUGGESTIONS.map((l) => (
+                  <option key={l} value={l} />
+                ))}
+              </datalist>
+            </div>
+            <div className="form-group">
+              <label htmlFor="erpAsOf">ERP figures as on</label>
+              <input id="erpAsOf" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <span className="form-label">File (.xlsx or .csv)</span>
+            {file ? (
+              <div className="selected-file">
+                <FileSpreadsheet size={18} />
+                <div>
+                  <strong>{file.name}</strong>
+                  <span>{formatFileSize(file.size)}</span>
+                </div>
+                <button type="button" onClick={() => setFile(null)} aria-label="Remove file">
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <label className="upload-box">
+                <Upload size={20} />
+                <div className="upload-content">
+                  <strong>Choose the filled template</strong>
+                  <span>Excel (.xlsx) or CSV</span>
+                </div>
+                <span className="upload-button">Choose file</span>
+                <input
+                  type="file"
+                  accept=".xlsx,.csv"
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] ?? null);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            )}
+          </div>
+
+          <div className="form-actions">
+            <button type="submit" className="primary-button" disabled={saving || !classId}>
+              <Upload size={16} />
+              {saving ? "Importing…" : "Import ERP attendance"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div className="attendance-card">
+        <div className="attendance-card-header">
+          <div>
+            <h2>Uploads for {classId}</h2>
+            <p>The final report uses the newest one by default. Event sessions after its date aren't counted, since ERP hasn't recorded those lectures yet.</p>
+          </div>
+        </div>
+        {imports.length === 0 ? (
+          <p className="page-loading table-message">Nothing imported yet.</p>
+        ) : (
+          <div className="circular-table-wrap">
+            <table className="circular-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>As on</th>
+                  <th>Students</th>
+                  <th>File</th>
+                  <th>Uploaded</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {imports.map((i) => (
+                  <tr key={i.id}>
+                    <td>
+                      <strong>{i.label}</strong>
+                    </td>
+                    <td>{formatDate(i.asOf, false)}</td>
+                    <td>{i.students}</td>
+                    <td className="cell-sub-text">{i.fileName}</td>
+                    <td className="cell-sub-text">
+                      {i.uploadedBy}, {timeAgo(i.uploadedAt).toLowerCase()}
+                    </td>
+                    <td>
+                      <button className="icon-text-button" onClick={() => remove(i)}>
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* =========================================
+   REPORT 1: EVENT ATTENDANCE
+========================================= */
+
+function EventReportPage({ classId, classPicker }: { classId: string; classPicker: ReactNode }) {
+  const [report, setReport] = useState<EventReport | null>(null);
+  const [courseId, setCourseId] = useState("all");
+  const [search, setSearch] = useState("");
+  const [onlyWith, setOnlyWith] = useState(true);
+  const [error, setError] = useState("");
+  const { busy, run } = useDownload(setError);
+
+  useEffect(() => {
+    if (!classId) return;
+    api
+      .eventReport(classId)
+      .then(setReport)
+      .catch((err: Error) => setError(err.message));
+  }, [classId]);
+
+  const rows = useMemo(() => {
+    if (!report) return [];
+    const q = search.trim().toLowerCase();
+    return report.students
+      .map((s) => {
+        const byPhase = courseId === "all" ? s.byPhase : s.perCourse[courseId] ?? {};
+        const total = Object.values(byPhase).reduce((a, b) => a + b, 0);
+        return { ...s, shown: byPhase, shownTotal: total };
+      })
+      .filter((s) => !onlyWith || s.shownTotal > 0 || s.pendingApplications > 0)
+      .filter((s) => !q || s.student.name.toLowerCase().includes(q) || s.student.prn.toLowerCase().includes(q));
+  }, [report, courseId, search, onlyWith]);
+
+  const withEvents = report?.students.filter((s) => s.total > 0).length ?? 0;
+
+  return (
+    <section className="attendance-page">
+      <PageHeading
+        title="Event attendance report"
+        text="Sessions missed for approved events, from the time table, split by CIA. Updates as soon as you approve an application."
+      >
+        {classPicker}
+        <button className="primary-button" onClick={() => run("xlsx", () => api.downloadEventReport(classId))} disabled={!report || busy === "xlsx"}>
+          <Download size={16} />
+          {busy === "xlsx" ? "Preparing…" : "Download Excel"}
+        </button>
+      </PageHeading>
+
+      {error && <div className="page-error">{error}</div>}
+
+      <div className="attendance-card">
+        <div className="attendance-card-header attendance-controls">
+          <div className="attendance-filters attendance-filters-row">
+            <select value={courseId} onChange={(e) => setCourseId(e.target.value)} aria-label="Subject">
+              <option value="all">All subjects</option>
+              {report?.courses.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <input className="search-input" placeholder="Search name or PRN" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={onlyWith} onChange={(e) => setOnlyWith(e.target.checked)} />
+            Only students with event applications
+          </label>
+        </div>
+
+        {!report ? (
+          <p className="page-loading table-message">Loading…</p>
+        ) : (
+          <>
+            <p className="table-caption">
+              {withEvents} of {report.students.length} students have approved event sessions.
+            </p>
+            <div className="circular-table-wrap">
+              <table className="circular-table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    {report.phases.map((p) => (
+                      <th key={p.key}>
+                        {p.label}
+                        <span className="cell-sub th-sub">
+                          {formatDate(p.start, false)} to {formatDate(p.end, false)}
+                        </span>
+                      </th>
+                    ))}
+                    <th>Total sessions</th>
+                    <th>Approved</th>
+                    <th>Waiting</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.student.id}>
+                      <td>
+                        <StudentCell student={r.student} />
+                      </td>
+                      {report.phases.map((p) => (
+                        <td key={p.key}>{r.shown[p.key] || "-"}</td>
+                      ))}
+                      <td>
+                        <strong>{r.shownTotal}</strong>
+                      </td>
+                      <td>{r.approvedApplications}</td>
+                      <td>{r.pendingApplications ? <span className="text-pending">{r.pendingApplications}</span> : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {rows.length === 0 && <p className="page-loading table-message">No students match.</p>}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function StudentCell({ student }: { student: { name: string; prn: string; rollNo?: number } }) {
+  return (
+    <div className="attendance-student">
+      <div className="attendance-avatar">{initials(student.name)}</div>
+      <div>
+        <strong>{student.name}</strong>
+        <span className="student-meta">
+          {student.rollNo ? `Roll ${student.rollNo}, ` : ""}
+          {student.prn}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================
+   REPORT 2: FINAL ATTENDANCE
+========================================= */
+
+const STATUS_FILTERS: { key: FinalStatus | "all"; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "detained", label: "Detained" },
+  { key: "subject", label: "Subject detained" },
+  { key: "clear", label: "Not detained" },
+  { key: "missing", label: "No ERP data" },
+];
+
+function FinalReportPage({ classId, classPicker, onGoToErp }: { classId: string; classPicker: ReactNode; onGoToErp: () => void }) {
+  const [report, setReport] = useState<FinalReport | null>(null);
+  const [importId, setImportId] = useState<string | undefined>(undefined);
+  const [filter, setFilter] = useState<FinalStatus | "all">("all");
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const { busy, run } = useDownload(setError);
+
+  useEffect(() => {
+    if (!classId) return;
     let cancelled = false;
     api
-      .classAttendance(activeClass)
-      .then((d) => {
-        if (cancelled) return;
-        setData(d);
-        setError("");
-      })
-      .catch((err: Error) => !cancelled && setError(err.message));
+      .finalReport(classId, importId)
+      .then((r) => !cancelled && (setReport(r), setError("")))
+      .catch((err: Error) => !cancelled && (setReport(null), setError(err.message)))
+      .finally(() => !cancelled && setLoaded(true));
     return () => {
       cancelled = true;
     };
-  }, [activeClass]);
-
-  const threshold = data?.threshold ?? 75;
-  const activeCourse = courseId && data?.courses.some((c) => c.id === courseId) ? courseId : data?.courses[0]?.id ?? "";
+  }, [classId, importId]);
 
   const rows = useMemo(() => {
-    if (!data) return [];
+    if (!report) return [];
     const q = search.trim().toLowerCase();
-    return data.students
-      .map(({ student, rows }) => ({ student, row: rows.find((r) => r.courseId === activeCourse) as CircularRow | undefined }))
-      .filter(({ student }) => !q || student.name.toLowerCase().includes(q) || student.prn.toLowerCase().includes(q))
-      .filter(({ row }) => !onlyRisk || (row?.finalPercent != null && row.finalPercent < threshold));
-  }, [data, activeCourse, search, onlyRisk, threshold]);
+    return report.students
+      .filter((s) => filter === "all" || s.statusKey === filter)
+      .filter((s) => !q || s.student.name.toLowerCase().includes(q) || s.student.prn.toLowerCase().includes(q));
+  }, [report, filter, search]);
 
-  const entered = data ? data.students.filter((s) => s.rows.some((r) => r.total !== null)).length : 0;
+  const chosen = report?.import.id;
+
+  return (
+    <section className="attendance-page">
+      <PageHeading
+        title="Final attendance report"
+        text="ERP attendance merged with approved event sessions: (ERP attended + event sessions) / ERP total, per subject and overall."
+      >
+        {classPicker}
+      </PageHeading>
+
+      {!loaded ? (
+        <p className="page-loading">Loading…</p>
+      ) : !report ? (
+        <div className="empty-state">
+          <p>{error || "No report yet."}</p>
+          <button className="secondary-button" onClick={onGoToErp}>
+            Go to ERP attendance
+          </button>
+        </div>
+      ) : (
+        <>
+          {error && <div className="page-error">{error}</div>}
+
+          <div className="report-bar">
+            <div className="form-group">
+              <label htmlFor="snapshot">ERP upload</label>
+              <select id="snapshot" className="toolbar-select" value={chosen} onChange={(e) => setImportId(e.target.value)}>
+                {report.imports.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.label} (as on {formatDate(i.asOf, false)})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="toolbar">
+              <button className="secondary-button" onClick={() => run("xlsx", () => api.downloadFinalReport(classId, chosen))} disabled={busy !== ""}>
+                <FileSpreadsheet size={16} />
+                {busy === "xlsx" ? "Preparing…" : "Download Excel"}
+              </button>
+              <button className="primary-button" onClick={() => run("docx", () => api.downloadDetentionList(classId, chosen))} disabled={busy !== ""}>
+                <FileText size={16} />
+                {busy === "docx" ? "Preparing…" : "Detention list (Word)"}
+              </button>
+            </div>
+          </div>
+
+          <div className="stat-row">
+            <div className="stat-card stat-bad">
+              <span>Detained</span>
+              <strong>{report.counts.detained}</strong>
+              <p>Overall final attendance below {report.threshold}%.</p>
+            </div>
+            <div className="stat-card stat-warn">
+              <span>Subject detained</span>
+              <strong>{report.counts.subject}</strong>
+              <p>Overall fine, but below {report.threshold}% in some subjects.</p>
+            </div>
+            <div className="stat-card stat-good">
+              <span>Not detained</span>
+              <strong>{report.counts.clear}</strong>
+              <p>{report.threshold}% or more overall and in every subject.</p>
+            </div>
+            <div className="stat-card">
+              <span>No ERP data</span>
+              <strong>{report.counts.missing}</strong>
+              <p>Not in the uploaded ERP file.</p>
+            </div>
+          </div>
+
+          <div className="attendance-card">
+            <div className="attendance-card-header attendance-controls">
+              <div className="filter-tabs" role="tablist">
+                {STATUS_FILTERS.map((f) => (
+                  <button key={f.key} role="tab" aria-selected={filter === f.key} className={filter === f.key ? "active" : ""} onClick={() => setFilter(f.key)}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <input className="search-input" placeholder="Search name or PRN" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+
+            <div className="circular-table-wrap">
+              <table className="circular-table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>ERP %</th>
+                    <th>Event sessions</th>
+                    <th>Final %</th>
+                    <th>Subjects below {report.threshold}%</th>
+                    <th>Status</th>
+                    <th aria-label="Details" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <FinalRow key={r.student.id} row={r} threshold={report.threshold} open={open === r.student.id} onToggle={() => setOpen(open === r.student.id ? null : r.student.id)} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {rows.length === 0 && <p className="page-loading table-message">No students match.</p>}
+
+            <div className="attendance-footer">
+              <span>
+                Using ERP upload "{report.import.label}" as on {formatDate(report.import.asOf, false)}. Event sessions after this date aren't added.
+              </span>
+              <strong>Minimum: {report.threshold}%</strong>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function FinalRow({ row, threshold, open, onToggle }: { row: FinalReport["students"][number]; threshold: number; open: boolean; onToggle: () => void }) {
+  const statusClass = { detained: "status-rejected", subject: "status-pending", clear: "status-approved", missing: "status-neutral" }[row.statusKey];
+  return (
+    <>
+      <tr className={open ? "row-open" : ""}>
+        <td>
+          <StudentCell student={row.student} />
+        </td>
+        <td className={row.erpPercent !== null && row.erpPercent < threshold ? "text-warning" : ""}>{pctText(row.erpPercent)}</td>
+        <td>{row.credit ? `+${row.credit}` : "-"}</td>
+        <td>
+          <strong className={row.finalPercent === null ? "" : row.finalPercent < threshold ? "text-warning" : "text-good"}>{pctText(row.finalPercent)}</strong>
+        </td>
+        <td className="cell-sub-text">{row.below.length ? row.below.join(", ") : "-"}</td>
+        <td>
+          <span className={`status-badge ${statusClass}`}>{row.status}</span>
+          {row.savedByEvents && <span className="cell-sub text-good">Cleared by event attendance</span>}
+        </td>
+        <td>
+          {row.subjects.length > 0 && (
+            <button className="icon-text-button" onClick={onToggle} aria-expanded={open}>
+              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              Subjects
+            </button>
+          )}
+        </td>
+      </tr>
+      {open && (
+        <tr className="detail-row">
+          <td colSpan={7}>
+            <table className="circular-table compact-table nested-table">
+              <thead>
+                <tr>
+                  <th>Subject</th>
+                  <th>ERP attendance</th>
+                  <th>ERP %</th>
+                  <th>Event sessions</th>
+                  <th>Total attendance</th>
+                  <th>Final %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {row.subjects.map((s) => (
+                  <tr key={s.courseId}>
+                    <td>
+                      <strong>{s.subjectName}</strong>
+                      <span className="cell-sub">{s.subjectCode}</span>
+                    </td>
+                    <td>
+                      {s.attended}/{s.total}
+                    </td>
+                    <td className={s.erpPercent < threshold ? "text-warning" : ""}>{s.erpPercent}%</td>
+                    <td>
+                      {s.eventSessions}
+                      {s.credit < s.eventSessions && <span className="cell-sub">capped at {s.credit}</span>}
+                    </td>
+                    <td>{s.credit ? `${s.attended}+${s.credit}` : s.attended}</td>
+                    <td>
+                      <strong className={s.finalPercent < threshold ? "text-warning" : "text-good"}>{s.finalPercent}%</strong>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/* =========================================
+   STUDENTS (passwords)
+========================================= */
+
+function StudentsPage({ classId, classPicker }: { classId: string; classPicker: ReactNode }) {
+  const [students, setStudents] = useState<StudentListItem[]>([]);
+  const [search, setSearch] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const { busy, run } = useDownload(setError);
+
+  const load = useCallback(
+    () =>
+      classId
+        ? api
+            .students(classId)
+            .then((d) => setStudents(d.students))
+            .catch((err: Error) => setError(err.message))
+        : Promise.resolve(),
+    [classId]
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return students.filter((s) => !q || s.name.toLowerCase().includes(q) || s.prn.toLowerCase().includes(q));
+  }, [students, search]);
+
+  const activated = students.filter((s) => s.activated).length;
+
+  const downloadPasswords = () => {
+    const ok = window.confirm(
+      `Create starting passwords for ${classId}?\n\nEvery student who hasn't set their own password yet gets a NEW password, ` +
+        "and any earlier password file for them stops working. Students who already logged in are not affected."
+    );
+    if (!ok) return;
+    run("passwords", async () => {
+      await api.downloadPasswords(classId);
+      setNotice(`Starting passwords for ${classId} downloaded. Only this file is valid. Give each student only their own row.`);
+    });
+  };
 
   const resetPassword = async (prn: string) => {
     if (!window.confirm(`Reset the password for ${prn}? They'll have to set a new one when they log in.`)) return;
     try {
       const r = await api.resetPassword(prn);
       setNotice(`New starting password for ${r.name} (${r.prn}): ${r.password}`);
+      await load();
     } catch (err) {
       setError((err as Error).message);
-    }
-  };
-
-  const downloadPasswords = async () => {
-    const ok = window.confirm(
-      `Create starting passwords for ${activeClass}?\n\n` +
-        "Every student who hasn't set their own password yet gets a NEW password, " +
-        "and any earlier password file for them stops working. " +
-        "Students who already logged in are not affected."
-    );
-    if (!ok) return;
-    setDownloading(true);
-    try {
-      await api.downloadPasswords(activeClass);
-      setNotice(`Starting passwords for ${activeClass} downloaded. Only this file is valid. Give each student only their own row.`);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  const download = async () => {
-    setDownloading(true);
-    try {
-      await api.downloadSummary(activeClass);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setDownloading(false);
     }
   };
 
   return (
     <section className="attendance-page">
-      <button className="back-button" onClick={onBack}>
-        <ArrowLeft size={17} />
-        Back to applications
-      </button>
-
-      <div className="application-heading application-heading-row">
-        <div>
-          <h1>Class attendance</h1>
-          <p>ERP attendance entered by students, plus approved event lectures (circular step 6.a).</p>
-        </div>
-        <div className="toolbar">
-          <button className="secondary-button" onClick={downloadPasswords} disabled={downloading || !activeClass}>
-            <KeyRound size={16} />
-            Download starting passwords
-          </button>
-          <button className="primary-button" onClick={download} disabled={downloading || !data?.ready}>
-            <Download size={16} />
-            {downloading ? "Preparing…" : "Export summary (Excel)"}
-          </button>
-        </div>
-      </div>
+      <PageHeading title="Students" text={`${students.length} students, ${activated} have logged in and set their own password.`}>
+        {classPicker}
+        <button className="primary-button" onClick={downloadPasswords} disabled={!classId || busy === "passwords"}>
+          <KeyRound size={16} />
+          {busy === "passwords" ? "Preparing…" : "Download starting passwords"}
+        </button>
+      </PageHeading>
 
       {notice && (
         <div className="form-success notice-banner" role="status">
@@ -406,108 +1023,40 @@ function ClassAttendancePage({ classes, onBack }: ClassAttendancePageProps) {
 
       <div className="attendance-card">
         <div className="attendance-card-header attendance-controls">
-          <div className="attendance-filters attendance-filters-row">
-            <select value={activeClass} onChange={(e) => { setClassId(e.target.value); setCourseId(""); }} aria-label="Class">
-              {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.id}: {c.label}
-                </option>
-              ))}
-            </select>
-            <select value={activeCourse} onChange={(e) => setCourseId(e.target.value)} aria-label="Subject" disabled={!data?.ready}>
-              {data?.courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <input className="search-input" placeholder="Search name or PRN" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-          <label className="checkbox-label">
-            <input type="checkbox" checked={onlyRisk} onChange={(e) => setOnlyRisk(e.target.checked)} />
-            Only below {threshold}%
-          </label>
+          <input className="search-input" placeholder="Search name or PRN" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-
-        {!data ? (
-          <p className="page-loading table-message">Loading…</p>
-        ) : !data.ready ? (
-          <p className="page-loading table-message">
-            The time table or academic calendar for {activeClass} hasn't been added yet, so attendance can't be calculated.
-          </p>
-        ) : (
-          <>
-            <p className="table-caption">
-              {data.students.length} students, {entered} have entered their ERP attendance.
-            </p>
-            <div className="circular-table-wrap">
-              <table className="circular-table">
-                <thead>
-                  <tr>
-                    <th>Student</th>
-                    <th>ERP attendance</th>
-                    <th>ERP %</th>
-                    <th>Lectures missed</th>
-                    <th>Total</th>
-                    <th>Final</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(({ student, row }) => {
-                    const has = row && row.total !== null;
-                    const below = has && (row!.finalPercent ?? 0) < threshold;
-                    return (
-                      <tr key={student.id}>
-                        <td>
-                          <div className="attendance-student">
-                            <div className="attendance-avatar">{initials(student.name)}</div>
-                            <div>
-                              <strong>{student.name}</strong>
-                              <span className="student-meta">
-                                {student.rollNo ? `Roll ${student.rollNo}, ` : ""}
-                                {student.prn}
-                              </span>
-                            </div>
-                          </div>
-                        </td>
-                        {has ? (
-                          <>
-                            <td>{row!.attended}/{row!.total}</td>
-                            <td>{row!.erpPercent}%</td>
-                            <td>
-                              {row!.approvedMissed}
-                              {row!.pendingMissed > 0 && <span className="cell-sub text-pending">+{row!.pendingMissed} waiting</span>}
-                            </td>
-                            <td>{row!.credit ? `${row!.attended}+${row!.credit}` : row!.attended}</td>
-                            <td>
-                              <strong className={below ? "text-warning" : "text-good"}>{row!.finalPercent}%</strong>
-                            </td>
-                          </>
-                        ) : (
-                          <td colSpan={5} className="cell-missing">
-                            ERP attendance not entered
-                          </td>
-                        )}
-                        <td>
-                          <button className="icon-text-button" onClick={() => resetPassword(student.prn)} title="Reset password">
-                            <KeyRound size={14} />
-                            Reset
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {rows.length === 0 && <p className="page-loading table-message">No students match.</p>}
-          </>
-        )}
-
-        <div className="attendance-footer">
-          <span>Lectures missed only counts approved event applications, capped at the sessions actually missed.</span>
-          <strong>Threshold: {threshold}%</strong>
+        <div className="circular-table-wrap">
+          <table className="circular-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Login</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id}>
+                  <td>
+                    <StudentCell student={s} />
+                  </td>
+                  <td>
+                    {s.activated ? (
+                      <span className="status-badge status-approved">Active</span>
+                    ) : (
+                      <span className="status-badge status-neutral">Not logged in yet</span>
+                    )}
+                  </td>
+                  <td>
+                    <button className="icon-text-button" onClick={() => resetPassword(s.prn)}>
+                      <KeyRound size={14} />
+                      Reset password
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </section>
@@ -525,9 +1074,9 @@ type ApplicationDetailsProps = {
 };
 
 function ApplicationDetails({ application, onBack, onReviewed }: ApplicationDetailsProps) {
-  const [calc, setCalc] = useState<{ counted: boolean; rows: CircularRow[] } | null>(null);
+  const [calc, setCalc] = useState<Calculation | null>(null);
   const [remark, setRemark] = useState("");
-  const [checks, setChecks] = useState({ letter: false, evidence: false, erp: false });
+  const [checks, setChecks] = useState({ letter: false, evidence: false, erp: false }); // erp = lectures check
   const [saving, setSaving] = useState<"approved" | "rejected" | null>(null);
   const [error, setError] = useState("");
 
@@ -593,18 +1142,16 @@ function ApplicationDetails({ application, onBack, onReviewed }: ApplicationDeta
             <ClipboardCheck size={18} />
           </div>
           <div>
-            <h2>{isEvent ? "Attendance calculation" : "Affected subjects"}</h2>
+            <h2>{isEvent ? "Sessions missed for this event" : "Affected subjects"}</h2>
             <p>
               {isEvent
-                ? application.status === "pending"
-                  ? "Final attendance if this application is approved, including earlier approved ones. Verify the ERP numbers."
-                  : "Final attendance with this application included."
-                : "Shown for the record. Nothing is added for medical leave."}
+                ? "Once approved, these are added to the event attendance report and to the final attendance."
+                : "Shown for the record. Medical leave is never added, as per the circular."}
             </p>
           </div>
         </div>
         {calc ? (
-          <CircularTable rows={calc.rows} threshold={75} mode="application" counted={calc.counted} />
+          <SubjectTable subjects={calc.subjects} phases={calc.phases} />
         ) : (
           <p className="page-loading">Calculating…</p>
         )}
@@ -736,7 +1283,7 @@ function ApplicationDetails({ application, onBack, onReviewed }: ApplicationDeta
                     </label>
                     <label>
                       <input type="checkbox" checked={checks.erp} onChange={(e) => setChecks({ ...checks, erp: e.target.checked })} />
-                      ERP numbers match ERP
+                      Student has actually missed these lectures
                     </label>
                   </div>
                 )}

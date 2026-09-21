@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS faculty_classes (
     PRIMARY KEY (faculty_id, class_id)
 );
 
--- ERP attendance entered by the student (circular step 7), per course.
+-- Old: ERP attendance typed in by students. No longer used (coordinators import it now).
 CREATE TABLE IF NOT EXISTS erp_attendance (
     student_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     course_id  TEXT NOT NULL,
@@ -82,6 +82,28 @@ CREATE TABLE IF NOT EXISTS documents (
     original_name  TEXT NOT NULL,
     mime_type      TEXT NOT NULL,
     size           INTEGER NOT NULL
+);
+
+-- ERP attendance imported by the class coordinator: one snapshot per upload
+-- (e.g. "Till CIA-1", "Till CIA-2"), each with the date the ERP figures were taken.
+CREATE TABLE IF NOT EXISTS erp_imports (
+    id          TEXT PRIMARY KEY,
+    class_id    TEXT NOT NULL REFERENCES classes(id),
+    label       TEXT NOT NULL,
+    as_of       TEXT NOT NULL,
+    file_name   TEXT NOT NULL,
+    uploaded_by TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    UNIQUE (class_id, label)
+);
+
+CREATE TABLE IF NOT EXISTS erp_records (
+    import_id  TEXT NOT NULL REFERENCES erp_imports(id) ON DELETE CASCADE,
+    student_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    course_id  TEXT NOT NULL,
+    attended   INTEGER NOT NULL,
+    total      INTEGER NOT NULL,
+    PRIMARY KEY (import_id, student_id, course_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_class ON users(class_id);

@@ -164,7 +164,7 @@ function Faculty({ user, onLogout }: FacultyProps) {
           ) : activePage === "event" ? (
             <EventReportPage key={classId} classId={classId} classPicker={classPicker} />
           ) : activePage === "final" ? (
-            <FinalReportPage key={classId} classId={classId} classPicker={classPicker} onGoToErp={() => setActivePage("erp")} />
+            <FinalReportPage key={classId} classId={classId} classPicker={classPicker} allClasses={classes.length > 1} onGoToErp={() => setActivePage("erp")} />
           ) : activePage === "students" ? (
             <StudentsPage key={classId} classId={classId} classPicker={classPicker} />
           ) : activePage === "application" && selected ? (
@@ -725,7 +725,14 @@ const STATUS_FILTERS: { key: FinalStatus | "all"; label: string }[] = [
   { key: "missing", label: "No ERP data" },
 ];
 
-function FinalReportPage({ classId, classPicker, onGoToErp }: { classId: string; classPicker: ReactNode; onGoToErp: () => void }) {
+type FinalReportPageProps = {
+  classId: string;
+  classPicker: ReactNode;
+  allClasses: boolean;
+  onGoToErp: () => void;
+};
+
+function FinalReportPage({ classId, classPicker, allClasses, onGoToErp }: FinalReportPageProps) {
   const [report, setReport] = useState<FinalReport | null>(null);
   const [importId, setImportId] = useState<string | undefined>(undefined);
   const [filter, setFilter] = useState<FinalStatus | "all">("all");
@@ -798,8 +805,14 @@ function FinalReportPage({ classId, classPicker, onGoToErp }: { classId: string;
               </button>
               <button className="primary-button" onClick={() => run("docx", () => api.downloadDetentionList(classId, chosen))} disabled={busy !== ""}>
                 <FileText size={16} />
-                {busy === "docx" ? "Preparing…" : "Detention list (Word)"}
+                {busy === "docx" ? "Preparing…" : `Detention list: ${classId}`}
               </button>
+              {allClasses && (
+                <button className="primary-button" onClick={() => run("dept", () => api.downloadDepartmentDetentionList())} disabled={busy !== ""}>
+                  <FileText size={16} />
+                  {busy === "dept" ? "Preparing…" : "Detention list: all classes"}
+                </button>
+              )}
             </div>
           </div>
 

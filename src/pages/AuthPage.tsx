@@ -4,7 +4,6 @@ import { AlertCircle, Eye, EyeOff, FileCheck } from "lucide-react";
 import { api } from "../api";
 import type { AuthResponse, ClassInfo } from "../types";
 // Place Su-college-logo.webp inside src/assets/
-import suLogo from "../assets/Su-college-logo.webp";
 import "../styles/Auth.css";
 
 // Logo embedded as base64 — no file copy needed

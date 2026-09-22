@@ -229,6 +229,10 @@ export const api = {
       `Final_attendance_${classId}.xlsx`
     ),
 
+  /** One detention list for every class the faculty member can see (HoD: whole department). */
+  downloadDepartmentDetentionList: () =>
+    downloadFile("/api/reports/detention-list", "Detention_List_CSE.docx"),
+
   downloadDetentionList: (classId: string, importId?: string) =>
     downloadFile(
       `/api/reports/final/${encodeURIComponent(classId)}/detention-list${importId ? `?importId=${importId}` : ""}`,

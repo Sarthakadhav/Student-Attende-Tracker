@@ -770,7 +770,7 @@ def issue_passwords(class_id: str, user=Depends(require_role("faculty"))):
 
 ERP_HEADER_RE = re.compile(r"^\s*([A-Za-z0-9]+)\s+(attended|total)\s*$", re.IGNORECASE)
 CLASS_NAMES = {"FY": "First Year", "SY-A": "Second Year", "SY-B": "DSY",
-               "TY-A": "Third Year", "TY-B": "Third Year", "BTECH": "Final Year"}
+               "TY-A": "Third Year A", "TY-B": "Third Year B", "BTECH": "Final Year"}
 
 
 def xlsx_response(wb, filename: str) -> StreamingResponse:
@@ -1373,22 +1373,20 @@ def final_report_xlsx(class_id: str, importId: str | None = None, user=Depends(r
     return xlsx_response(wb, f"Final_attendance_{class_id}_{imp['asOf']}.xlsx")
 
 
-@app.get("/api/reports/final/{class_id}/detention-list")
-def detention_list_docx(class_id: str, importId: str | None = None, user=Depends(require_role("faculty"))):
-    """The detention list in the department's Word format, ready for the HoD's signature."""
+def detention_docx(entries: list[tuple[str, dict]], prepared_by: str, skipped: list[str]) -> io.BytesIO:
+    """
+    The detention list in the department's Word format (letterhead from seed/detention_template.docx).
+    entries: [(class_id, final report), ...] in the order they should appear.
+    """
     import docx
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
     from docx.shared import Inches, Pt
 
-    with get_db() as conn:
-        require_class(conn, user, class_id)
-        report = build_final_report(conn, class_id, importId)
-
-    detained = [r for r in report["students"] if r["statusKey"] in ("detained", "subject")]
     template = Path(__file__).parent / "seed" / "detention_template.docx"
     doc = docx.Document(str(template)) if template.exists() else docx.Document()
-
     for p in (doc.sections[0].header.paragraphs if template.exists() else []):
         if "Academic Year" in p.text and p.runs:
             p.runs[0].text = "                                    ODD SEMESTER, Academic Year 2026-27"
@@ -1404,80 +1402,126 @@ def detention_list_docx(class_id: str, importId: str | None = None, user=Depends
         p.paragraph_format.space_after = Pt(space_after)
         return p
 
-    para(f"Date: {datetime.now().strftime('%d %B %Y')}", align=WD_ALIGN_PARAGRAPH.RIGHT)
+    day = datetime.now()
+    suffix = "th" if 11 <= day.day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day.day % 10, "th")
+    para(f"Date: {day.day}{suffix} {day.strftime('%B %Y')}", align=WD_ALIGN_PARAGRAPH.RIGHT)
     para("Detention List", bold=True, size=14, align=WD_ALIGN_PARAGRAPH.CENTER, space_after=8)
-    para("This is to inform that, as per the university attendance criteria, the following students have "
-         "not maintained the minimum required attendance and are therefore detained.",
+    para("This is to inform that, as per the university attendance criteria, the following students have not "
+         "maintained the minimum required attendance and are therefore detained.", align=WD_ALIGN_PARAGRAPH.JUSTIFY)
+    para("As per university rules, students who fail to meet the minimum attendance requirement are not eligible "
+         "to appear for the End Semester Examination (ESE) scheduled as per the academic calendar.",
          align=WD_ALIGN_PARAGRAPH.JUSTIFY)
-    as_of_text = datetime.strptime(report["import"]["asOf"], "%Y-%m-%d").strftime("%d %B %Y")
-    para(f"Attendance below includes ERP attendance as on {as_of_text} and the lectures missed "
-         "for approved event participation, as per the Registrar's instructions.", align=WD_ALIGN_PARAGRAPH.JUSTIFY)
-    para("As per university rules, students who fail to meet the minimum attendance requirement are not "
-         "eligible to appear for the End Semester Examination (ESE).", align=WD_ALIGN_PARAGRAPH.JUSTIFY)
     para("Note : These students will not be permitted to appear for the above examinations under any "
          "circumstances. Students are advised to take this matter seriously and comply with university "
          "regulations.", align=WD_ALIGN_PARAGRAPH.JUSTIFY, space_after=10)
 
     table = doc.add_table(rows=1, cols=6)
-    # Borders set directly: the letterhead template has no "Table Grid" style.
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    borders = OxmlElement("w:tblBorders")
+    borders = OxmlElement("w:tblBorders")  # the letterhead template has no "Table Grid" style
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
         el = OxmlElement(f"w:{edge}")
-        el.set(qn("w:val"), "single")
-        el.set(qn("w:sz"), "4")
-        el.set(qn("w:space"), "0")
-        el.set(qn("w:color"), "000000")
+        for key, value in (("w:val", "single"), ("w:sz", "4"), ("w:space", "0"), ("w:color", "000000")):
+            el.set(qn(key), value)
         borders.append(el)
     table._tbl.tblPr.append(borders)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     for cell, text in zip(table.rows[0].cells, ["Sr. No", "Class", "Roll No.", "Name of the Student",
                                                 "Attendance", "Remark"]):
         cell.text = ""
-        run = cell.paragraphs[0].add_run(text)
-        run.bold = True
-    if not detained:
+        cell.paragraphs[0].add_run(text).bold = True
+
+    sr = 0
+    for class_id, report in entries:
+        for r in report["students"]:
+            if r["statusKey"] not in ("detained", "subject"):
+                continue
+            sr += 1
+            if r["statusKey"] == "detained":
+                remark = "Permanently Detained" if (r["finalPercent"] or 0) == 0 else "Detained"
+            else:
+                n = len(r["below"])
+                remark = f"{n} Subject{'s' if n > 1 else ''} detained ({', '.join(r['below'])})"
+            values = [f"{sr}.", CLASS_NAMES.get(class_id, class_id), str(r["student"]["rollNo"] or ""),
+                      r["student"]["name"], f"{r['finalPercent']:g}%", remark]
+            for cell, text in zip(table.add_row().cells, values):
+                cell.text = text
+    if sr == 0:
         cells = table.add_row().cells
         cells[0].merge(cells[5]).text = "No students are detained."
-    for i, r in enumerate(detained, start=1):
-        remark = ("Detained" if r["statusKey"] == "detained"
-                  else f"{len(r['below'])} Subject detained: " + ", ".join(r["below"]))
-        values = [f"{i}.", CLASS_NAMES.get(class_id, class_id), str(r["student"]["rollNo"] or ""),
-                  r["student"]["name"], f"{r['finalPercent']}%", remark]
-        for cell, text in zip(table.add_row().cells, values):
-            cell.text = text
+
+    # Repeat the header row on every page and keep each row on one page.
+    for i, row in enumerate(table.rows):
+        tr_pr = row._tr.get_or_add_trPr()
+        cant_split = OxmlElement("w:cantSplit")
+        tr_pr.append(cant_split)
+        if i == 0:
+            tr_pr.append(OxmlElement("w:tblHeader"))
+
     table.autofit = False
-    widths = [Inches(w) for w in (0.55, 0.95, 0.6, 2.05, 0.9, 1.5)]
+    widths = [Inches(w) for w in (0.55, 1.0, 0.6, 2.0, 0.9, 1.5)]
     for column, width in zip(table.columns, widths):
         column.width = width
     for row in table.rows:
         for cell, width in zip(row.cells, widths):
             cell.width = width
-        for cell in row.cells:
             for p in cell.paragraphs:
                 for run in p.runs:
                     run.font.size = Pt(10)
 
     para()
+    basis = "; ".join(f"{cid}: ERP as on {formatted(rep['import']['asOf'])}" for cid, rep in entries)
+    para(f"Attendance = ERP attendance plus lectures missed for approved events ({basis}).", size=9)
+    if skipped:
+        para(f"Not included, no ERP attendance uploaded yet: {', '.join(skipped)}.", size=9)
     para()
     para("Dr. Mahendra Gawali", bold=True, align=WD_ALIGN_PARAGRAPH.RIGHT, space_after=0)
     para("HoD CSE", bold=True, align=WD_ALIGN_PARAGRAPH.RIGHT)
-    para(f"Prepared by: {user['name']}, Class Coordinator ({class_id})", size=10)
+    para(f"Prepared by: {prepared_by}", size=10)
     para("Copy to", bold=True)
-    for line in ("1. Registrar Office", "2. SET DEAN Office", "3. Class Coordinator File"):
+    for line in ("Registrar Office", "SET DEAN Office", "Class Coordinator File"):
         para(line, space_after=0)
 
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
+    return buffer
+
+
+def docx_response(buffer: io.BytesIO, filename: str) -> StreamingResponse:
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition":
-                 f'attachment; filename="Detention_List_{class_id}_{datetime.now().strftime("%Y%m%d")}.docx"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+
+@app.get("/api/reports/final/{class_id}/detention-list")
+def detention_list_docx(class_id: str, importId: str | None = None, user=Depends(require_role("faculty"))):
+    """Detention list for one class."""
+    with get_db() as conn:
+        require_class(conn, user, class_id)
+        report = build_final_report(conn, class_id, importId)
+    buffer = detention_docx([(class_id, report)], f"{user['name']}, Class Coordinator ({class_id})", [])
+    return docx_response(buffer, f"Detention_List_{class_id}_{datetime.now().strftime('%Y%m%d')}.docx")
+
+
+@app.get("/api/reports/detention-list")
+def department_detention_list(user=Depends(require_role("faculty"))):
+    """
+    One detention list for every class this faculty member can see (HoD: the whole department),
+    like the department's own list. Each class uses its newest ERP upload.
+    """
+    entries, skipped = [], []
+    with get_db() as conn:
+        for class_id in visible_classes(conn, user):
+            if not engine.is_ready(class_id) or not list_imports(conn, class_id):
+                skipped.append(class_id)
+                continue
+            entries.append((class_id, build_final_report(conn, class_id, None)))
+    if not entries:
+        raise ApiError(400, "No class has ERP attendance uploaded yet, so there is nothing to list.")
+    who = f"{user['name']}, {user['designation'] or 'Faculty'}"
+    buffer = detention_docx(entries, who, skipped)
+    return docx_response(buffer, f"Detention_List_CSE_{datetime.now().strftime('%Y%m%d')}.docx")
 
 
 if __name__ == "__main__":

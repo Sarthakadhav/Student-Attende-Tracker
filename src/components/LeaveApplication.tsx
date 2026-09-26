@@ -372,8 +372,13 @@ const LeaveApplication = ({ onBack, onSubmitted }: LeaveApplicationProps) => {
           <button type="button" className="secondary-button" onClick={onBack}>
             Cancel
           </button>
-          <button type="submit" className="primary-button" disabled={submitting}>
-            {submitting ? "Submitting…" : "Submit application"}
+          <button type="submit" className="primary-button"
+            disabled={submitting || (kind === "event" && !approvalLetter)}>
+            {submitting
+              ? "Submitting…"
+              : kind === "event" && evidenceType === "certificate" && !evidence
+              ? "Submit — certificate after the event"
+              : "Submit application"}
           </button>
         </div>
       </form>

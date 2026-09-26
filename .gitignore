@@ -32,3 +32,4 @@ __pycache__/
 server/data/
 server/seed/students.csv
 *.xlsx
+*.xls

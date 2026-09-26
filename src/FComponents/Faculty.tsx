@@ -23,6 +23,7 @@ import {
 import { api } from "../api";
 import type { Calculation, ErpImportResult } from "../api";
 import Header from "../components/Header";
+import { NotificationBell, useNotifications } from "../components/NotificationBell";
 import Sidebar from "../components/Sidebar";
 import type { NavItem } from "../components/Sidebar";
 import StatusBadge from "../components/StatusBadge";
@@ -74,6 +75,7 @@ function Faculty({ user, onLogout }: FacultyProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<Page>("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
+  const notif = useNotifications();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -119,6 +121,12 @@ function Faculty({ user, onLogout }: FacultyProps) {
     }
   };
 
+  const navigateToApp = (appId: string) => {
+    const app = applications.find((a) => a.id === appId);
+    if (app) openApplication(app);
+    else { setSelectedId(null); setActivePage("dashboard"); }
+  };
+
   const goToDashboard = () => {
     setSelectedId(null);
     setActivePage("dashboard");
@@ -151,9 +159,8 @@ function Faculty({ user, onLogout }: FacultyProps) {
           title="Faculty portal"
           userName={user.name}
           userDetail={scope}
-          hasUnread={applications.some((a) => a.unread)}
-          onBellClick={goToDashboard}
           onMenuClick={() => setMenuOpen(true)}
+          bellSlot={<NotificationBell {...notif} onNavigate={navigateToApp} />}
         />
 
         <div className="content">
@@ -358,7 +365,7 @@ const LABEL_SUGGESTIONS = ["Till CIA-1", "Till CIA-2", "Detention list"];
 
 function ErpPage({ classId, classPicker }: { classId: string; classPicker: ReactNode }) {
   const [imports, setImports] = useState<ErpImport[]>([]);
-  const [label, setLabel] = useState("Till CIA-1");
+  const [label, setLabel] = useState("");
   const [asOf, setAsOf] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -385,9 +392,7 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
     e.preventDefault();
     setError("");
     setResult(null);
-    if (label.trim().length < 2) return setError("Give this upload a name, e.g. Till CIA-1.");
-    if (!asOf) return setError("Enter the date the ERP figures were taken on.");
-    if (!file) return setError("Choose the filled ERP attendance file.");
+    if (!file) return setError("Choose the ERP attendance file.");
     const form = new FormData();
     form.append("label", label.trim());
     form.append("asOf", asOf);
@@ -396,6 +401,8 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
     try {
       setResult(await api.importErp(classId, form));
       setFile(null);
+      setLabel("");
+      setAsOf("");
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -418,7 +425,7 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
     <section className="attendance-page">
       <PageHeading
         title="ERP attendance"
-        text="Import the attended and total sessions of every student from ERP. The final attendance report merges these with approved event sessions."
+        text="Upload the ERP export 'Student Slot Type Wise Matrix' (Division wise Subject wise Attendance %) as it is. The final attendance report merges it with the granted event lectures."
       >
         {classPicker}
       </PageHeading>
@@ -428,10 +435,14 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
         <div className="form-success" role="status">
           <Check size={17} />
           <span>
-            Imported {result.students} students across {result.subjects} subjects
-            {result.replaced ? ", replacing the earlier upload with this name" : ""}.
-            {result.missingStudents > 0 && ` ${result.missingStudents} student(s) of the class weren't in the file.`}
-            {result.unknownPrns.length > 0 && ` Ignored PRNs not in ${classId}: ${result.unknownPrns.join(", ")}.`}
+            Imported "{result.label}" (as on {formatDate(result.asOf, false)}): {result.students} students, {result.subjects} subjects
+            {result.division && `, ${result.division}`}
+            {result.replaced ? ". It replaced the earlier upload with this name" : ""}.
+            {result.missingStudents > 0 && ` ${result.missingStudents} student(s) of ${classId} weren't in the file.`}
+            {result.unknownCount > 0 &&
+              ` ${result.unknownCount} PRN(s) in the file aren't in ${classId} and were skipped: ${result.unknownPrns.join(", ")}${result.unknownCount > result.unknownPrns.length ? "…" : ""}.`}
+            {result.unmatchedSubjects.length > 0 &&
+              ` Not linked to the time table (counted in attendance, but no event lectures can be added): ${result.unmatchedSubjects.join(", ")}.`}
           </span>
         </div>
       )}
@@ -441,8 +452,8 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
           <div className="card-title">
             <div className="card-icon">1</div>
             <div>
-              <h2>Download the template</h2>
-              <p>An Excel sheet with every student and subject of {classId}. Fill it from ERP.</p>
+              <h2>Export from ERP</h2>
+              <p>In ERP, download "Student Slot Type Wise Matrix" for {classId}. Upload it here without changing it.</p>
             </div>
           </div>
           <button
@@ -451,11 +462,11 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
             disabled={!classId || busy === "template"}
           >
             <FileSpreadsheet size={16} />
-            {busy === "template" ? "Preparing…" : "Download template"}
+            {busy === "template" ? "Preparing…" : "No ERP export? Download a blank sheet"}
           </button>
           <p className="field-hint">
-            For each subject, fill <strong>Attended</strong> and <strong>Total</strong> sessions. Leave both empty if a subject
-            doesn't apply to a student.
+            Both .xls (ERP's format) and .xlsx work. Subjects are matched to the time table by their code, so event
+            lectures go to the right subject and to Lab or Lecture.
           </p>
         </div>
 
@@ -463,15 +474,18 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
           <div className="card-title">
             <div className="card-icon">2</div>
             <div>
-              <h2>Upload the filled file</h2>
-              <p>Uploading again with the same name replaces the earlier one.</p>
+              <h2>Upload the ERP file</h2>
+              <p>Name and date are read from the file. Uploading again with the same name replaces it.</p>
             </div>
           </div>
 
           <div className="form-grid">
             <div className="form-group">
-              <label htmlFor="erpLabel">Name</label>
-              <input id="erpLabel" list="erp-labels" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={40} />
+              <label htmlFor="erpLabel">
+                Name <span className="optional-tag">optional</span>
+              </label>
+              <input id="erpLabel" list="erp-labels" value={label} placeholder="From the file, e.g. ERP till 15-09-2026"
+                onChange={(e) => setLabel(e.target.value)} maxLength={40} />
               <datalist id="erp-labels">
                 {LABEL_SUGGESTIONS.map((l) => (
                   <option key={l} value={l} />
@@ -479,13 +493,15 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
               </datalist>
             </div>
             <div className="form-group">
-              <label htmlFor="erpAsOf">ERP figures as on</label>
+              <label htmlFor="erpAsOf">
+                ERP figures as on <span className="optional-tag">optional</span>
+              </label>
               <input id="erpAsOf" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
             </div>
           </div>
 
           <div className="form-group">
-            <span className="form-label">File (.xlsx or .csv)</span>
+            <span className="form-label">ERP file (.xls, .xlsx or .csv)</span>
             {file ? (
               <div className="selected-file">
                 <FileSpreadsheet size={18} />
@@ -501,13 +517,13 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
               <label className="upload-box">
                 <Upload size={20} />
                 <div className="upload-content">
-                  <strong>Choose the filled template</strong>
-                  <span>Excel (.xlsx) or CSV</span>
+                  <strong>Choose the ERP export</strong>
+                  <span>Student Slot Type Wise Matrix (.xls / .xlsx)</span>
                 </div>
                 <span className="upload-button">Choose file</span>
                 <input
                   type="file"
-                  accept=".xlsx,.csv"
+                  accept=".xls,.xlsx,.csv"
                   onChange={(e) => {
                     setFile(e.target.files?.[0] ?? null);
                     e.target.value = "";
@@ -542,6 +558,7 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
                 <tr>
                   <th>Name</th>
                   <th>As on</th>
+                  <th>Division / period</th>
                   <th>Students</th>
                   <th>File</th>
                   <th>Uploaded</th>
@@ -555,6 +572,14 @@ function ErpPage({ classId, classPicker }: { classId: string; classPicker: React
                       <strong>{i.label}</strong>
                     </td>
                     <td>{formatDate(i.asOf, false)}</td>
+                    <td className="cell-sub-text">
+                      {i.division || "-"}
+                      {i.periodFrom && i.periodTo && (
+                        <span className="cell-sub">
+                          {formatDate(i.periodFrom, false)} to {formatDate(i.periodTo, false)}
+                        </span>
+                      )}
+                    </td>
                     <td>{i.students}</td>
                     <td className="cell-sub-text">{i.fileName}</td>
                     <td className="cell-sub-text">
@@ -586,6 +611,7 @@ function EventReportPage({ classId, classPicker }: { classId: string; classPicke
   const [courseId, setCourseId] = useState("all");
   const [search, setSearch] = useState("");
   const [onlyWith, setOnlyWith] = useState(true);
+  const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState("");
   const { busy, run } = useDownload(setError);
 
@@ -604,7 +630,11 @@ function EventReportPage({ classId, classPicker }: { classId: string; classPicke
       .map((s) => {
         const byPhase = courseId === "all" ? s.byPhase : s.perCourse[courseId] ?? {};
         const total = Object.values(byPhase).reduce((a, b) => a + b, 0);
-        return { ...s, shown: byPhase, shownTotal: total };
+        const erpParts = courseId === "all" ? Object.values(s.erp) : s.erp[courseId] ? [s.erp[courseId]] : [];
+        const erpShown = erpParts.length
+          ? erpParts.reduce((a, e) => ({ attended: a.attended + e.attended, total: a.total + e.total }), { attended: 0, total: 0 })
+          : null;
+        return { ...s, shown: byPhase, shownTotal: total, erpShown };
       })
       .filter((s) => !onlyWith || s.shownTotal > 0 || s.pendingApplications > 0)
       .filter((s) => !q || s.student.name.toLowerCase().includes(q) || s.student.prn.toLowerCase().includes(q));
@@ -651,7 +681,10 @@ function EventReportPage({ classId, classPicker }: { classId: string; classPicke
         ) : (
           <>
             <p className="table-caption">
-              {withEvents} of {report.students.length} students have approved event sessions.
+              {withEvents} of {report.students.length} students have approved event sessions.{" "}
+              {report.erpImport
+                ? `ERP attended is from the upload "${report.erpImport.label}" (as on ${formatDate(report.erpImport.asOf, false)}).`
+                : "ERP attended will show here once you upload ERP attendance."}
             </p>
             <div className="circular-table-wrap">
               <table className="circular-table">
@@ -666,26 +699,22 @@ function EventReportPage({ classId, classPicker }: { classId: string; classPicke
                         </span>
                       </th>
                     ))}
-                    <th>Total sessions</th>
+                    <th>Total granted</th>
+                    <th>ERP attended</th>
                     <th>Approved</th>
                     <th>Waiting</th>
+                    <th aria-label="Details" />
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.student.id}>
-                      <td>
-                        <StudentCell student={r.student} />
-                      </td>
-                      {report.phases.map((p) => (
-                        <td key={p.key}>{r.shown[p.key] || "-"}</td>
-                      ))}
-                      <td>
-                        <strong>{r.shownTotal}</strong>
-                      </td>
-                      <td>{r.approvedApplications}</td>
-                      <td>{r.pendingApplications ? <span className="text-pending">{r.pendingApplications}</span> : "-"}</td>
-                    </tr>
+                    <EventRow
+                      key={r.student.id}
+                      row={r}
+                      report={report}
+                      open={open === r.student.id}
+                      onToggle={() => setOpen(open === r.student.id ? null : r.student.id)}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -695,6 +724,112 @@ function EventReportPage({ classId, classPicker }: { classId: string; classPicke
         )}
       </div>
     </section>
+  );
+}
+
+type EventRowProps = {
+  row: EventReport["students"][number] & {
+    shown: Record<string, number>;
+    shownTotal: number;
+    erpShown: { attended: number; total: number } | null;
+  };
+  report: EventReport;
+  open: boolean;
+  onToggle: () => void;
+};
+
+function erpText(e: { attended: number; total: number } | null | undefined) {
+  if (!e || !e.total) return "-";
+  return `${e.attended}/${e.total} (${Math.round((e.attended / e.total) * 10000) / 100}%)`;
+}
+
+function EventRow({ row: r, report, open, onToggle }: EventRowProps) {
+  const colCount = report.phases.length + 6;
+  return (
+    <>
+      <tr className={open ? "row-open" : ""}>
+        <td>
+          <StudentCell student={r.student} />
+        </td>
+        {report.phases.map((p) => (
+          <td key={p.key}>{r.shown[p.key] || "-"}</td>
+        ))}
+        <td>
+          <strong>{r.shownTotal}</strong>
+        </td>
+        <td className="cell-sub-text">{erpText(r.erpShown)}</td>
+        <td>{r.approvedApplications}</td>
+        <td>{r.pendingApplications ? <span className="text-pending">{r.pendingApplications}</span> : "-"}</td>
+        <td>
+          <button className="icon-text-button" onClick={onToggle} aria-expanded={open}>
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            Subjects
+          </button>
+        </td>
+      </tr>
+      {open && (
+        <tr className="detail-row">
+          <td colSpan={colCount}>
+            <table className="circular-table compact-table nested-table">
+              <thead>
+                <tr>
+                  <th>Subject</th>
+                  {report.phases.map((p) => (
+                    <th key={p.key}>{p.label}</th>
+                  ))}
+                  <th>Granted (event lectures)</th>
+                  <th>ERP attended</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.courses.map((c) => {
+                  const phases = r.perCourse[c.id] ?? {};
+                  const granted = Object.values(phases).reduce((a, b) => a + b, 0);
+                  return (
+                    <tr key={c.id}>
+                      <td>
+                        <strong>{c.name}</strong>
+                        <span className="cell-sub">{c.code}</span>
+                      </td>
+                      {report.phases.map((p) => (
+                        <td key={p.key}>{phases[p.key] || "-"}</td>
+                      ))}
+                      <td>
+                        <strong>{granted || "-"}</strong>
+                      </td>
+                      <td>{erpText(r.erp[c.id])}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>
+                    <strong>Total</strong>
+                  </td>
+                  {report.phases.map((p) => (
+                    <td key={p.key}>{r.byPhase[p.key] || "-"}</td>
+                  ))}
+                  <td>
+                    <strong>{r.total}</strong>
+                  </td>
+                  <td>
+                    {erpText(
+                      Object.keys(r.erp).length
+                        ? Object.values(r.erp).reduce(
+                            (a, e) => ({ attended: a.attended + e.attended, total: a.total + e.total }),
+                            { attended: 0, total: 0 }
+                          )
+                        : null
+                    )}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -936,6 +1071,13 @@ function FinalRow({ row, threshold, open, onToggle }: { row: FinalReport["studen
                     </td>
                     <td>
                       {s.attended}/{s.total}
+                      {s.slots && Object.keys(s.slots).length > 1 && (
+                        <span className="cell-sub">
+                          {Object.entries(s.slots)
+                            .map(([slot, v]) => `${slot} ${v.present}/${v.conducted}`)
+                            .join(" · ")}
+                        </span>
+                      )}
                     </td>
                     <td className={s.erpPercent < threshold ? "text-warning" : ""}>{s.erpPercent}%</td>
                     <td>

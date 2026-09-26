@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException
 
+import erp_matrix
 import lecture_engine as engine
 from database import UPLOAD_DIR, get_db, init_db
 
@@ -257,6 +258,9 @@ def application_json(row, conn) -> dict:
         "lectures": lectures,
         "sessions": sum(l["sessions"] for l in lectures),
         "evidenceType": row["evidence_type"],
+        "certificatePending": bool(row["certificate_pending"]),
+        "studentUnread": bool(row["student_unread"]),
+        "reminderSentAt": row["reminder_sent_at"],
         "status": row["status"],
         "unread": bool(row["unread"]),
         "remark": row["remark"],
@@ -505,6 +509,29 @@ def academic(user=Depends(current_user)):
 
 
 @app.post("/api/applications/preview")
+
+def notify(conn, user_id: str, title: str, body: str, kind: str, application_id: str | None = None):
+    conn.execute(
+        """INSERT INTO notifications (id, user_id, title, body, kind, application_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (str(uuid.uuid4()), user_id, title, body, kind, application_id, now_iso()),
+    )
+
+
+def notify_faculty_new_app(conn, class_id: str, student_name: str, event_name: str, app_id: str,
+                           title: str = "New application", kind: str = "new_application"):
+    """Notify every faculty member who can see this class (its coordinators, and the HoD if any)."""
+    faculty = conn.execute(
+        """SELECT u.id FROM users u
+           WHERE u.role = 'faculty' AND (
+               EXISTS (SELECT 1 FROM faculty_classes f WHERE f.faculty_id = u.id AND f.class_id = ?)
+               OR NOT EXISTS (SELECT 1 FROM faculty_classes f WHERE f.faculty_id = u.id))""",
+        (class_id,),
+    ).fetchall()
+    for row in faculty:
+        notify(conn, row["id"], title, f"{student_name}: {event_name}.", kind, app_id)
+
+
 def preview(body: dict = Body(default_factory=dict), user=Depends(require_role("student"))):
     start_date, end_date = body.get("startDate"), body.get("endDate")
     result = validate_dates(user["class_id"], start_date, end_date)
@@ -551,11 +578,19 @@ async def submit_application(
     if not lectures:
         raise ApiError(400, "No lectures fall on these dates, so there's nothing to add.")
 
+    cert_pending = False
     files = []
     if kind == "event":
+        if not approvalLetter or not approvalLetter.filename:
+            raise ApiError(400, "Upload the pre-approval letter for the event.")
         files.append(("approval_letter", *await read_upload(approvalLetter, "pre-approval letter")))
-        label = "certificate" if evidence_type == "certificate" else "HoD/Dean permission letter"
-        files.append(("evidence", *await read_upload(evidence, label)))
+        if evidence and evidence.filename:
+            label = "certificate" if evidence_type == "certificate" else "HoD/Dean permission letter"
+            files.append(("evidence", *await read_upload(evidence, label)))
+        elif evidence_type == "authority_permission":
+            raise ApiError(400, "Upload the HoD/Dean permission letter.")
+        else:
+            cert_pending = True   # certificate to be uploaded after the event
     else:
         files.append(("evidence", *await read_upload(evidence, "medical certificate")))
 
@@ -573,13 +608,16 @@ async def submit_application(
             )
 
         application_id = str(uuid.uuid4())
+        submitted = now_iso()
         conn.execute(
             """INSERT INTO applications (id, student_id, class_id, kind, category, event_name,
-                   description, start_date, end_date, lectures, evidence_type, submitted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   description, start_date, end_date, lectures, evidence_type, certificate_pending,
+                   submitted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (application_id, user["id"], user["class_id"], kind, category, event_name, description,
-             startDate, endDate, json.dumps(lectures), evidence_type, now_iso()),
+             startDate, endDate, json.dumps(lectures), evidence_type, int(cert_pending), submitted),
         )
+        notify_faculty_new_app(conn, user["class_id"], user["name"], event_name, application_id)
 
         written = []
         try:
@@ -662,11 +700,17 @@ def review(application_id: str, body: dict = Body(default_factory=dict),
         check_application_access(conn, user, row)
         if row["status"] != "pending":
             raise ApiError(409, f"This application was already {row['status']}.")
+        student_row = conn.execute("SELECT * FROM users WHERE id = ?", (row["student_id"],)).fetchone()
         conn.execute(
-            """UPDATE applications SET status = ?, remark = ?, unread = 0, reviewed_at = ?,
-                   reviewed_by = ? WHERE id = ?""",
+            """UPDATE applications SET status = ?, remark = ?, unread = 0, student_unread = 1,
+                   reviewed_at = ?, reviewed_by = ? WHERE id = ?""",
             (status, remark, now_iso(), user["name"], application_id),
         )
+        if student_row:
+            verb = "approved" if status == "approved" else "rejected"
+            notify(conn, student_row["id"], f"Application {verb}",
+                   f'Your application for {row["event_name"]} has been {verb}.' +
+                   (f" Note: {remark}" if remark else ""), "reviewed", application_id)
         return {"application": application_json(get_application(conn, application_id), conn)}
 
 
@@ -949,6 +993,146 @@ def write_grid_sheet(ws, title: str, note: str, groups: list, students: list, va
     ws.print_title_rows = "3:4"
 
 
+ERP_PROGRAM = "SET - B.Tech - CSE (Institute-Program)"
+
+
+def write_erp_matrix(ws, title: str, info: str, groups: list, colnames: list, students: list,
+                     cell_fn, grand_fn, trailing: list | None = None, zero_as_dash: bool = False):
+    """
+    Writes a sheet in the ERP "Division wise Subject wise Attendance %" layout:
+      row 1 title, row 2 program|division|period, rows 3-4 empty,
+      row 5 subject (merged), row 6 slot type (merged), row 7 PRN | Roll No | Name | column names,
+      row 8+ one row per student, then a Grand Total block and any extra columns.
+    groups:   [(subject label, [slot, ...]), ...]
+    cell_fn:  (student, group index, slot, column name, row, {column name: letter}) -> value
+    grand_fn: (student, column name, row, {column name: [letters]}, {column name: letter}) -> value
+    trailing: [(header, (student, row, {column name: letter of the Grand Total block}) -> value), ...]
+    """
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter as L
+
+    trailing = trailing or []
+    thin, thick = Side(style="thin", color="9FB1C4"), Side(style="medium", color="12355B")
+    col = 4
+    layout = []  # (group index, slot, {name: letter}, first col)
+    for gi, (_, slots) in enumerate(groups):
+        for slot in slots:
+            layout.append((gi, slot, {n: L(col + i) for i, n in enumerate(colnames)}, col))
+            col += len(colnames)
+    grand_first = col
+    grand = {n: L(col + i) for i, n in enumerate(colnames)}
+    col += len(colnames)
+    trail_first = col
+    last_col = col + len(trailing) - 1
+    all_letters = {n: [lt[n] for _, _, lt, _ in layout] for n in colnames}
+
+    title_end = min(last_col, 4 + 17)  # like ERP: title over the first subjects, visible without scrolling
+    ws.cell(row=1, column=4, value=title)
+    ws.merge_cells(start_row=1, start_column=4, end_row=1, end_column=title_end)
+    ws.cell(row=2, column=4, value=info)
+    ws.merge_cells(start_row=2, start_column=4, end_row=2, end_column=title_end)
+    for r, size in ((1, 13), (2, 10)):
+        c = ws.cell(row=r, column=4)
+        c.font = Font(name="Arial", bold=True, size=size, color="12355B")
+        c.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 24
+
+    # Subject (row 5) and slot (row 6) headers
+    for gi, (label, slots) in enumerate(groups):
+        cols = [first for g, _, _, first in layout if g == gi]
+        start, end = cols[0], cols[-1] + len(colnames) - 1
+        ws.cell(row=5, column=start, value=label)
+        if end > start:
+            ws.merge_cells(start_row=5, start_column=start, end_row=5, end_column=end)
+    for gi, slot, _, first in layout:
+        ws.cell(row=6, column=first, value=slot)
+        if len(colnames) > 1:
+            ws.merge_cells(start_row=6, start_column=first, end_row=6, end_column=first + len(colnames) - 1)
+    ws.cell(row=6, column=grand_first, value="Grand Total")
+    if len(colnames) > 1:
+        ws.merge_cells(start_row=6, start_column=grand_first, end_row=6, end_column=grand_first + len(colnames) - 1)
+    if trailing:
+        ws.cell(row=6, column=trail_first, value="Result")
+        if len(trailing) > 1:
+            ws.merge_cells(start_row=6, start_column=trail_first, end_row=6, end_column=last_col)
+
+    # Column names (row 7)
+    for i, h in enumerate(["PRN", "Roll No", "Name"], start=1):
+        ws.cell(row=7, column=i, value=h)
+    for _, _, letters, first in layout + [(None, None, grand, grand_first)]:
+        for i, n in enumerate(colnames):
+            ws.cell(row=7, column=first + i, value=n)
+    for i, (h, _) in enumerate(trailing):
+        ws.cell(row=7, column=trail_first + i, value=h)
+
+    # Students
+    for r, s in enumerate(students, start=8):
+        ws.cell(row=r, column=1, value=s["prn"])
+        ws.cell(row=r, column=2, value=s.get("roll_no"))
+        ws.cell(row=r, column=3, value=s["name"])
+        for gi, slot, letters, first in layout:
+            for i, n in enumerate(colnames):
+                ws.cell(row=r, column=first + i, value=cell_fn(s, gi, slot, n, r, letters))
+        for i, n in enumerate(colnames):
+            ws.cell(row=r, column=grand_first + i, value=grand_fn(s, n, r, all_letters, grand))
+        for i, (_, fn) in enumerate(trailing):
+            ws.cell(row=r, column=trail_first + i, value=fn(s, r, grand))
+
+    # Styling
+    last_row = 7 + len(students)
+    bands = ["EAF2FB", "FFFFFF"]
+    heads = ["BDD7EE", "DDEBF7"]
+    for row in ws.iter_rows(min_row=5, max_row=last_row, min_col=1, max_col=last_col):
+        for c in row:
+            c.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            c.font = Font(name="Arial", size=10, bold=c.row <= 7)
+            if c.row <= 7:
+                c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                c.fill = PatternFill("solid", start_color="DCE6F1")
+            else:
+                c.alignment = Alignment(horizontal="left" if c.column <= 3 else "center", vertical="center")
+                if c.column > 3:
+                    if zero_as_dash:
+                        c.number_format = '0;-0;"-"'
+                    elif ws.cell(row=7, column=c.column).value == "%":
+                        c.number_format = "0.00"
+    for gi, (_, slots) in enumerate(groups):
+        cols = [first for g, _, _, first in layout if g == gi]
+        start, end = cols[0], cols[-1] + len(colnames) - 1
+        for row in ws.iter_rows(min_row=5, max_row=last_row, min_col=start, max_col=end):
+            for c in row:
+                c.fill = PatternFill("solid", start_color=(heads if c.row <= 7 else bands)[gi % 2])
+                if c.column == start:
+                    c.border = Border(left=thick, right=thin, top=thin, bottom=thin)
+    for row in ws.iter_rows(min_row=5, max_row=last_row, min_col=grand_first, max_col=last_col):
+        for c in row:
+            c.fill = PatternFill("solid", start_color="FFE699" if c.row <= 7 else "FFF2CC")
+            c.font = Font(name="Arial", size=10, bold=True)
+            if c.column in (grand_first, trail_first):
+                c.border = Border(left=thick, right=thin, top=thin, bottom=thin)
+    ws.row_dimensions[5].height = 45
+    ws.row_dimensions[7].height = 30
+    ws.column_dimensions["A"].width = 15
+    ws.column_dimensions["B"].width = 8
+    ws.column_dimensions["C"].width = 32
+    for i in range(4, last_col + 1):
+        ws.column_dimensions[L(i)].width = 10
+    for i, (h, _) in enumerate(trailing):
+        ws.column_dimensions[L(trail_first + i)].width = max(12, min(40, len(h) + 12))
+    ws.freeze_panes = "D8"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = max(1, (last_col + 21) // 24)  # about 24 columns per printed page
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_title_rows = "5:7"
+    ws.print_title_cols = "A:C"
+
+
+def ref_sum(letters: list, row: int) -> str:
+    return "=" + ("+".join(f"{x}{row}" for x in letters) if letters else "0")
+
+
 @app.get("/api/erp/template/{class_id}")
 def erp_template(class_id: str, user=Depends(require_role("faculty"))):
     """Excel sheet with every student and subject of the class, ready to fill from ERP."""
@@ -1001,6 +1185,58 @@ def _as_int(value):
     return int(float(text))
 
 
+def parse_template(rows: list[list], class_id: str) -> dict:
+    """Our own ERP template (one 'Attended' and 'Total' column per subject), in the matrix shape."""
+    header_index = next((i for i, r in enumerate(rows[:15])
+                         if any(str(c).strip().upper() == "PRN" for c in r if c is not None)), None)
+    if header_index is None:
+        raise ApiError(400, "Couldn't find the header row with 'PRN'. Upload the ERP export as it is.")
+    header = [str(c).strip() if c is not None else "" for c in rows[header_index]]
+    prn_col = next(i for i, h in enumerate(header) if h.upper() == "PRN")
+    courses = {c["id"].upper(): c for c in engine.courses_for(class_id)}
+    columns = {}
+    for i, h in enumerate(header):
+        m = ERP_HEADER_RE.match(h)
+        if not m:
+            continue
+        course = courses.get(m.group(1).upper())
+        if course is None:
+            raise ApiError(400, f"Column '{h}' isn't a subject of {class_id}.")
+        columns.setdefault(course["id"], {})[m.group(2).lower()] = i
+    columns = {c: v for c, v in columns.items() if "attended" in v and "total" in v}
+    if not columns:
+        raise ApiError(400, "This isn't the ERP 'Subject wise Attendance' export. Upload that file from ERP.")
+    by_id = {c["id"]: c for c in engine.courses_for(class_id)}
+    subjects = [{"key": cid, "code": by_id[cid]["code"], "name": by_id[cid]["name"],
+                 "label": f"{by_id[cid]['code']} - {by_id[cid]['name']}", "slots": ["Total"]} for cid in columns]
+    students, errors = [], []
+    for n, row in enumerate(rows[header_index + 1:], start=header_index + 2):
+        prn = str(row[prn_col]).strip().upper() if prn_col < len(row) and row[prn_col] else ""
+        if not prn:
+            continue
+        cells = {}
+        for cid, cols in columns.items():
+            try:
+                attended = _as_int(row[cols["attended"]] if cols["attended"] < len(row) else None)
+                total = _as_int(row[cols["total"]] if cols["total"] < len(row) else None)
+            except ValueError:
+                errors.append(f"Row {n} ({prn}), {cid}: use whole numbers.")
+                continue
+            if attended is None and total is None:
+                continue
+            if attended is None or total is None or attended > total:
+                errors.append(f"Row {n} ({prn}), {cid}: check attended and total.")
+                continue
+            cells[(cid, "Total")] = [total, attended]
+        students.append({"prn": prn, "cells": cells})
+    return {"subjects": subjects, "students": students, "errors": errors,
+            "periodFrom": None, "periodTo": None, "division": ""}
+
+
+def dmy_to_iso(dmy: str | None) -> str | None:
+    return datetime.strptime(dmy, "%d-%m-%Y").strftime("%Y-%m-%d") if dmy else None
+
+
 @app.post("/api/erp/import/{class_id}", status_code=201)
 async def erp_import(
     class_id: str,
@@ -1009,76 +1245,46 @@ async def erp_import(
     file: UploadFile | None = File(None),
     user=Depends(require_role("faculty")),
 ):
-    label = clean(label)
+    """
+    Imports the ERP export "Student Slot Type Wise Matrix" (Division wise Subject wise Attendance %)
+    as it comes out of ERP (.xls, .xlsx or .csv). Our older template is still accepted.
+    The name and as-on date are taken from the file when left empty.
+    """
+    if file is None or not file.filename:
+        raise ApiError(400, "Choose the ERP attendance file.")
+    content = await file.read(MAX_FILE_SIZE * 2 + 1)
+    if len(content) > MAX_FILE_SIZE * 2:
+        raise ApiError(400, "The file must be smaller than 10 MB.")
+    try:
+        rows = erp_matrix.read_rows(content, file.filename)
+        parsed = erp_matrix.parse(rows) if erp_matrix.is_matrix(rows) else parse_template(rows, class_id)
+    except erp_matrix.MatrixError as err:
+        raise ApiError(400, str(err))
+
+    if parsed["errors"]:
+        errors = parsed["errors"]
+        raise ApiError(400, f"{len(errors)} problem(s) in the file. Nothing was saved. "
+                            + " ".join(errors[:6]) + (" ..." if len(errors) > 6 else ""))
+
+    as_of = asOf or dmy_to_iso(parsed["periodTo"])
+    if not as_of or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", as_of):
+        raise ApiError(400, "Enter the date the ERP figures were taken on (the file doesn't say).")
+    label = clean(label) or (f"ERP till {parsed['periodTo']}" if parsed["periodTo"] else "")
     if not 2 <= len(label) <= 40:
         raise ApiError(400, "Give this upload a name, e.g. Till CIA-1.")
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", asOf or ""):
-        raise ApiError(400, "Enter the date the ERP figures were taken on.")
-    if file is None or not file.filename:
-        raise ApiError(400, "Choose the filled ERP attendance file.")
-    content = await file.read(MAX_FILE_SIZE + 1)
-    if len(content) > MAX_FILE_SIZE:
-        raise ApiError(400, "The file must be smaller than 5 MB.")
 
-    rows = _read_sheet_rows(content, file.filename)
-    header_index = next((i for i, r in enumerate(rows[:15])
-                         if any(str(c).strip().upper() == "PRN" for c in r if c is not None)), None)
-    if header_index is None:
-        raise ApiError(400, "Couldn't find the header row with 'PRN'. Use the downloaded template.")
-    header = [str(c).strip() if c is not None else "" for c in rows[header_index]]
-    prn_col = next(i for i, h in enumerate(header) if h.upper() == "PRN")
-
-    valid_courses = {c["id"].upper(): c["id"] for c in engine.courses_for(class_id)}
-    columns = {}  # course_id -> {"attended": col, "total": col}
-    for i, h in enumerate(header):
-        m = ERP_HEADER_RE.match(h)
-        if not m:
-            continue
-        course = valid_courses.get(m.group(1).upper())
-        if course is None:
-            raise ApiError(400, f"Column '{h}' isn't a subject of {class_id}. Use the downloaded template.")
-        columns.setdefault(course, {})[m.group(2).lower()] = i
-    columns = {c: v for c, v in columns.items() if "attended" in v and "total" in v}
-    if not columns:
-        raise ApiError(400, "No subject columns found (like 'CN Attended' and 'CN Total').")
+    mapping = erp_matrix.map_to_courses(parsed["subjects"], engine.courses_for(class_id)) \
+        if parsed["subjects"] and parsed["subjects"][0]["slots"] != ["Total"] \
+        else {s["key"]: s["key"] for s in parsed["subjects"]}
 
     with get_db() as conn:
         require_class(conn, user, class_id)
         students = {s["prn"].upper(): s for s in class_students(conn, class_id)}
-        records, errors, unknown = [], [], []
-        seen = set()
-        for n, row in enumerate(rows[header_index + 1:], start=header_index + 2):
-            prn = str(row[prn_col]).strip().upper() if prn_col < len(row) and row[prn_col] else ""
-            if not prn:
-                continue
-            student = students.get(prn)
-            if student is None:
-                unknown.append(prn)
-                continue
-            seen.add(prn)
-            for course, cols in columns.items():
-                try:
-                    attended = _as_int(row[cols["attended"]] if cols["attended"] < len(row) else None)
-                    total = _as_int(row[cols["total"]] if cols["total"] < len(row) else None)
-                except ValueError:
-                    errors.append(f"Row {n} ({prn}), {course}: use whole numbers.")
-                    continue
-                if attended is None and total is None:
-                    continue
-                if attended is None or total is None:
-                    errors.append(f"Row {n} ({prn}), {course}: fill both attended and total.")
-                elif total > 500:
-                    errors.append(f"Row {n} ({prn}), {course}: total {total} is too high for one semester.")
-                elif total < 1 or attended > total:
-                    errors.append(f"Row {n} ({prn}), {course}: attended {attended} can't be more than total {total}.")
-                else:
-                    records.append((student["id"], course, attended, total))
-
-        if errors:
-            raise ApiError(400, f"{len(errors)} problem(s) in the file. Nothing was saved. "
-                                + " ".join(errors[:8]) + (" ..." if len(errors) > 8 else ""))
-        if not records:
-            raise ApiError(400, "The file has no attendance numbers filled in.")
+        known = [s for s in parsed["students"] if s["prn"] in students and s["cells"]]
+        unknown = [s["prn"] for s in parsed["students"] if s["prn"] not in students]
+        if not known:
+            raise ApiError(400, f"None of the PRNs in this file belong to {class_id}. "
+                                f"Is it the right division? The file says: {parsed['division'] or 'no division'}.")
 
         old = conn.execute("SELECT id FROM erp_imports WHERE class_id = ? AND label = ?",
                            (class_id, label)).fetchone()
@@ -1086,23 +1292,48 @@ async def erp_import(
             conn.execute("DELETE FROM erp_imports WHERE id = ?", (old["id"],))
         import_id = str(uuid.uuid4())
         conn.execute(
-            """INSERT INTO erp_imports (id, class_id, label, as_of, file_name, uploaded_by, uploaded_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (import_id, class_id, label, asOf, Path(file.filename).name, user["name"], now_iso()),
+            """INSERT INTO erp_imports (id, class_id, label, as_of, file_name, uploaded_by, uploaded_at,
+                   division, period_from, period_to)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (import_id, class_id, label, as_of, Path(file.filename).name, user["name"], now_iso(),
+             parsed["division"], dmy_to_iso(parsed["periodFrom"]), dmy_to_iso(parsed["periodTo"])),
         )
         conn.executemany(
-            "INSERT INTO erp_records (import_id, student_id, course_id, attended, total) VALUES (?, ?, ?, ?, ?)",
-            [(import_id, *r) for r in records],
+            """INSERT INTO erp_subjects (import_id, ord, subject_key, code, name, label, slots, course_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [(import_id, i, s["key"], s["code"], s["name"], s["label"], json.dumps(s["slots"]),
+              mapping.get(s["key"])) for i, s in enumerate(parsed["subjects"])],
         )
+        cells, records = [], []
+        for s in known:
+            sid = students[s["prn"]]["id"]
+            per_subject: dict[str, list] = {}
+            for (key, slot), (cond, pres) in s["cells"].items():
+                cells.append((import_id, sid, key, slot, cond, pres))
+                agg = per_subject.setdefault(key, [0, 0])
+                agg[0] += cond
+                agg[1] += pres
+            records += [(import_id, sid, key, pres, cond) for key, (cond, pres) in per_subject.items()]
+        conn.executemany("""INSERT INTO erp_cells (import_id, student_id, subject_key, slot, conducted, present)
+                            VALUES (?, ?, ?, ?, ?, ?)""", cells)
+        conn.executemany("INSERT INTO erp_records (import_id, student_id, course_id, attended, total) "
+                         "VALUES (?, ?, ?, ?, ?)", records)
 
-    missing = [p for p in students if p not in seen]
+    seen = {s["prn"] for s in known}
     return {
         "importId": import_id,
         "replaced": bool(old),
+        "label": label,
+        "asOf": as_of,
+        "division": parsed["division"],
+        "periodFrom": dmy_to_iso(parsed["periodFrom"]),
+        "periodTo": dmy_to_iso(parsed["periodTo"]),
         "students": len(seen),
-        "subjects": len(columns),
+        "subjects": len(parsed["subjects"]),
+        "unmatchedSubjects": [s["label"] for s in parsed["subjects"] if s["key"] not in mapping],
         "unknownPrns": unknown[:20],
-        "missingStudents": len(missing),
+        "unknownCount": len(unknown),
+        "missingStudents": len([p for p in students if p not in seen]),
     }
 
 
@@ -1114,8 +1345,35 @@ def list_imports(conn, class_id: str) -> list[dict]:
         (class_id,),
     ).fetchall()
     return [{"id": r["id"], "label": r["label"], "asOf": r["as_of"], "fileName": r["file_name"],
-             "uploadedBy": r["uploaded_by"], "uploadedAt": r["uploaded_at"], "students": r["students"]}
+             "uploadedBy": r["uploaded_by"], "uploadedAt": r["uploaded_at"], "students": r["students"],
+             "division": r["division"], "periodFrom": r["period_from"], "periodTo": r["period_to"]}
             for r in rows]
+
+
+def load_erp(conn, import_id: str) -> tuple[list[dict], dict]:
+    """
+    Subjects of an ERP upload (in ERP order) and each student's numbers:
+    ({key, code, name, label, slots, courseId}, {student_id: {(key, slot): (conducted, present)}}).
+    Uploads made before the ERP matrix format are read from their per-subject totals.
+    """
+    subjects = [{"key": r["subject_key"], "code": r["code"], "name": r["name"], "label": r["label"],
+                 "slots": json.loads(r["slots"]), "courseId": r["course_id"]}
+                for r in conn.execute("SELECT * FROM erp_subjects WHERE import_id = ? ORDER BY ord", (import_id,))]
+    cells: dict[str, dict] = {}
+    if subjects:
+        for r in conn.execute("SELECT * FROM erp_cells WHERE import_id = ?", (import_id,)):
+            cells.setdefault(r["student_id"], {})[(r["subject_key"], r["slot"])] = (r["conducted"], r["present"])
+        return subjects, cells
+    rows = conn.execute("SELECT * FROM erp_records WHERE import_id = ?", (import_id,)).fetchall()
+    imp = conn.execute("SELECT class_id FROM erp_imports WHERE id = ?", (import_id,)).fetchone()
+    by_id = {c["id"]: c for c in engine.courses_for(imp["class_id"])} if imp else {}
+    for key in dict.fromkeys(r["course_id"] for r in rows):
+        c = by_id.get(key, {"code": "", "name": key})
+        subjects.append({"key": key, "code": c["code"], "name": c["name"], "label": f"{c['code']} - {c['name']}",
+                         "slots": ["Total"], "courseId": key})
+    for r in rows:
+        cells.setdefault(r["student_id"], {})[(r["course_id"], "Total")] = (r["total"], r["attended"])
+    return subjects, cells
 
 
 @app.get("/api/erp/imports/{class_id}")
@@ -1149,6 +1407,23 @@ def build_event_report(conn, class_id: str) -> dict:
            WHERE class_id = ? AND kind = 'event' AND status = 'approved' GROUP BY student_id""",
         (class_id,))}
 
+    # Newest ERP upload (if any), so the report can show ERP attended next to granted sessions.
+    imports = list_imports(conn, class_id)
+    latest = imports[0] if imports else None
+    erp: dict[str, dict] = {}
+    if latest:
+        erp_subjects, erp_cells = load_erp(conn, latest["id"])
+        course_of = {x["key"]: x["courseId"] for x in erp_subjects}
+        for student_id, cells in erp_cells.items():
+            mine = erp.setdefault(student_id, {})
+            for (key, _slot), (conducted, present) in cells.items():
+                course = course_of.get(key)
+                if not course:
+                    continue
+                agg = mine.setdefault(course, {"attended": 0, "total": 0})
+                agg["attended"] += present
+                agg["total"] += conducted
+
     students = []
     for s in class_students(conn, class_id):
         per_course = {c["id"]: {p["key"]: 0 for p in phases} for c in courses}
@@ -1165,8 +1440,9 @@ def build_event_report(conn, class_id: str) -> dict:
             "total": sum(by_phase.values()),
             "approvedApplications": app_counts.get(s["id"], 0),
             "pendingApplications": pending.get(s["id"], 0),
+            "erp": erp.get(s["id"], {}),
         })
-    return {"courses": courses, "phases": phases, "students": students}
+    return {"courses": courses, "phases": phases, "students": students, "erpImport": latest}
 
 
 @app.get("/api/reports/event/{class_id}")
@@ -1178,46 +1454,69 @@ def event_report(class_id: str, user=Depends(require_role("faculty"))):
 
 @app.get("/api/reports/event/{class_id}/xlsx")
 def event_report_xlsx(class_id: str, user=Depends(require_role("faculty"))):
-    """Event attendance in the same layout as the ERP template: subject-wise, total in the last column."""
+    """Event attendance in the ERP matrix layout: subject, Lab / Lecture, lectures granted per CIA phase."""
     from openpyxl import Workbook
-    from openpyxl.utils import get_column_letter
 
     with get_db() as conn:
         require_class(conn, user, class_id)
-        report = build_event_report(conn, class_id)
+        cls = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
         students = class_students(conn, class_id)
-        apps = conn.execute(
-            "SELECT * FROM applications WHERE class_id = ? ORDER BY submitted_at", (class_id,)
-        ).fetchall()
+        lectures_by_student = approved_event_lectures(conn, class_id)
+        imports = list_imports(conn, class_id)
+        erp_subjects = load_erp(conn, imports[0]["id"])[0] if imports else []
+        pending = pending_counts(conn, class_id)
+        approved = {r["student_id"]: r["n"] for r in conn.execute(
+            """SELECT student_id, COUNT(*) AS n FROM applications
+               WHERE class_id = ? AND kind = 'event' AND status = 'approved' GROUP BY student_id""", (class_id,))}
+        apps = conn.execute("SELECT * FROM applications WHERE class_id = ? ORDER BY submitted_at",
+                            (class_id,)).fetchall()
         app_rows = [(a, conn.execute("SELECT * FROM users WHERE id = ?", (a["student_id"],)).fetchone(),
                      documents_for(conn, a["id"])) for a in apps]
 
-    phases, courses = report["phases"], report["courses"]
-    per_student = {r["student"]["id"]: r["perCourse"] for r in report["students"]}
-    phase_range = ", ".join(f"{p['label']}: {formatted(p['start'])} to {formatted(p['end'])}" for p in phases)
+    phases, courses = engine.phases_for(class_id), engine.courses_for(class_id)
+    slots_of = engine.course_slots(class_id)
+    erp_label = {x["courseId"]: x["label"] for x in reversed(erp_subjects) if x["courseId"]}
+    groups = [(erp_label.get(c["id"], f"{c['code']} - {c['name']}"), slots_of.get(c["id"]) or ["Lecture"])
+              for c in courses]
 
-    def phase_total(k):
-        return lambda row, cols: "=" + "+".join(f"{g[k]}{row}" for g in cols)
+    # student id -> (course, slot, phase) -> sessions
+    counts: dict[str, dict] = {}
+    for sid, lectures in lectures_by_student.items():
+        mine = counts.setdefault(sid, {})
+        for lec in lectures:
+            key = (lec["courseId"], engine.slot_of(lec.get("type", "TH")), engine.phase_key(phases, lec["date"]))
+            mine[key] = mine.get(key, 0) + lec["sessions"]
+    rows = [{"id": s["id"], "prn": s["prn"], "roll_no": s["roll_no"], "name": s["name"]} for s in students]
+    cols = [p["label"] for p in phases] + ["Granted"]
 
-    first_total = 4 + len(courses) * len(phases)
-    phase_cols = [get_column_letter(first_total + k) for k in range(len(phases))]
-    trailing = [(f"Total {p['label']}", phase_total(k)) for k, p in enumerate(phases)]
-    trailing.append(("Total event sessions", lambda row, cols: f"=SUM({phase_cols[0]}{row}:{phase_cols[-1]}{row})"))
+    def cell(s, gi, slot, name, r, lt):
+        if name == "Granted":
+            return ref_sum([lt[p["label"]] for p in phases], r)
+        phase = next(p["key"] for p in phases if p["label"] == name)
+        return counts.get(s["id"], {}).get((courses[gi]["id"], slot, phase), 0)
 
+    def grand(s, name, r, every, own):
+        if name == "Granted":
+            return ref_sum([own[p["label"]] for p in phases], r)
+        return ref_sum(every[name], r)
+
+    trailing = [("Approved applications", lambda s, r, g: approved.get(s["id"], 0)),
+                ("Waiting for review", lambda s, r, g: pending.get(s["id"], 0))]
+
+    cal = engine.calendar_for(class_id)
+    info = (f"{ERP_PROGRAM}|{(imports[0]['division'] if imports and imports[0].get('division') else cls['label'])}"
+            f"|{formatted(cal['semesterStart'])} to {formatted(cal['semesterEnd'])}")
     wb = Workbook()
     ws = wb.active
     ws.title = "Event attendance"
-    write_grid_sheet(
-        ws,
-        title=f"Event attendance: {class_id} (approved applications only)",
-        note=f"Lectures missed for approved events, per subject, from the time table. Labs count as 1 session. "
-             f"{phase_range}. Generated {datetime.now().strftime('%d-%m-%Y %H:%M')} by {user['name']}.",
-        groups=[(f"{c['name']}\n{c['code']}", [p["label"] for p in phases]) for c in courses],
-        students=students,
-        values=lambda s, gi, ci: per_student.get(s["id"], {}).get(courses[gi]["id"], {}).get(phases[ci]["key"], 0),
-        trailing=trailing,
-        zero_as_dash=True,
-    )
+    write_erp_matrix(ws, "Division wise Subject wise Event Attendance (approved applications)", info,
+                     groups, cols, rows, cell, grand, trailing, zero_as_dash=True)
+    from openpyxl.styles import Font
+    ws.cell(row=3, column=4, value=(
+        "Lectures missed for approved events, from the time table (labs count as 1 session). "
+        + ", ".join(f"{p['label']}: {formatted(p['start'])} to {formatted(p['end'])}" for p in phases)
+        + f". Generated {datetime.now().strftime('%d-%m-%Y %H:%M')} by {user['name']}."))
+    ws.cell(row=3, column=4).font = Font(name="Arial", italic=True, size=9, color="44546A")
 
     ws2 = wb.create_sheet("Applications and evidence")
     ws2.append([f"All applications: {class_id}"])
@@ -1230,7 +1529,9 @@ def event_report_xlsx(class_id: str, user=Depends(require_role("faculty"))):
             formatted(a["submitted_at"][:10]), s["roll_no"] if s else "", s["prn"] if s else "",
             s["name"] if s else "", "Medical (not counted)" if a["kind"] == "medical" else "Event",
             a["category"], a["event_name"], formatted(a["start_date"]), formatted(a["end_date"]),
-            sum(l["sessions"] for l in lectures), EVIDENCE_TYPES.get(a["evidence_type"], "Medical certificate"),
+            sum(l["sessions"] for l in lectures),
+            "Certificate pending" if a["certificate_pending"]
+            else EVIDENCE_TYPES.get(a["evidence_type"], "Medical certificate"),
             "\n".join(f"{'Pre-approval letter' if d['kind'] == 'approval_letter' else 'Proof'}: {d['originalName']}"
                       for d in docs),
             a["status"].capitalize(), a["reviewed_by"] or "",
@@ -1250,6 +1551,40 @@ def formatted(iso: str) -> str:
 # ---------- Report 2: final attendance (ERP + approved events) ----------
 
 
+def allocate_events(subjects: list[dict], cells: dict, lectures: list[dict]) -> tuple[dict, int]:
+    """
+    Gives each missed event lecture to the matching ERP subject and slot (Lab / Lecture), capped at
+    the sessions the student was absent in that slot (circular: credit only for lectures missed).
+    Returns ({(key, slot): [event sessions, credit]}, event sessions with no matching ERP subject).
+    """
+    demand: dict[tuple, int] = {}
+    for lec in lectures:
+        k = (lec["courseId"], engine.slot_of(lec.get("type", "TH")))
+        demand[k] = demand.get(k, 0) + lec["sessions"]
+    result: dict[tuple, list] = {}
+    unmatched = 0
+    for (course, slot), sessions in demand.items():
+        owned = [s for s in subjects if s["courseId"] == course]
+        targets = [(s["key"], slot) for s in owned if (s["key"], slot) in cells]
+        if not targets:  # e.g. the time table has a lab but ERP lists the subject only as a lecture
+            targets = [(s["key"], sl) for s in owned for sl in s["slots"] if (s["key"], sl) in cells]
+        if not targets:
+            unmatched += sessions
+            continue
+        left = sessions
+        for i, t in enumerate(targets):
+            conducted, present = cells[t]
+            slot_credit = result.setdefault(t, [0, 0])
+            room = conducted - present - slot_credit[1]
+            give = min(left, max(room, 0))
+            slot_credit[1] += give
+            slot_credit[0] += give if i < len(targets) - 1 else left  # remaining sessions stay visible on the last one
+            left -= give
+            if left == 0:
+                break
+    return result, unmatched
+
+
 def build_final_report(conn, class_id: str, import_id: str | None) -> dict:
     imports = list_imports(conn, class_id)
     if not imports:
@@ -1259,61 +1594,66 @@ def build_final_report(conn, class_id: str, import_id: str | None) -> dict:
         raise ApiError(404, "That ERP upload doesn't exist.")
     as_of = chosen["asOf"]
 
-    courses = engine.courses_for(class_id)
-    erp = {}
-    for r in conn.execute("SELECT * FROM erp_records WHERE import_id = ?", (chosen["id"],)):
-        erp.setdefault(r["student_id"], {})[r["course_id"]] = (r["attended"], r["total"])
+    subjects, erp_cells = load_erp(conn, chosen["id"])
     lectures_by_student = approved_event_lectures(conn, class_id)
 
     students, counts = [], {"detained": 0, "subject": 0, "clear": 0, "missing": 0}
     for s in class_students(conn, class_id):
-        mine = erp.get(s["id"])
-        # Only event lectures up to the ERP date: later sessions aren't in the ERP totals yet.
-        events = engine.sessions_by_course([l for l in lectures_by_student.get(s["id"], []) if l["date"] <= as_of])
-        subjects = []
-        sum_att = sum_total = sum_credit = 0
-        for c in courses:
-            if not mine or c["id"] not in mine:
-                continue
-            attended, total = mine[c["id"]]
-            result = engine.final_attendance(attended, total, events.get(c["id"], 0))
-            subjects.append({
-                "courseId": c["id"], "subjectCode": c["code"], "subjectName": c["name"],
-                "attended": attended, "total": total, "erpPercent": result["erpPercent"],
-                "eventSessions": events.get(c["id"], 0), "credit": result["credit"],
-                "finalPercent": result["finalPercent"],
-            })
-            sum_att += attended
-            sum_total += total
-            sum_credit += result["credit"]
-
-        if not subjects:
-            status, counts["missing"] = "No ERP data", counts["missing"] + 1
+        cells = erp_cells.get(s["id"])
+        if not cells:
+            counts["missing"] += 1
             students.append({"student": {"id": s["id"], **student_info(s)}, "subjects": [],
-                             "erpPercent": None, "finalPercent": None, "credit": 0,
-                             "below": [], "erpBelow": [], "status": status, "statusKey": "missing"})
+                             "erpPercent": None, "finalPercent": None, "credit": 0, "unmatched": 0,
+                             "below": [], "erpBelow": [], "status": "No ERP data", "statusKey": "missing"})
             continue
+        # Only event lectures up to the ERP date: later sessions aren't in the ERP numbers yet.
+        lectures = [l for l in lectures_by_student.get(s["id"], []) if l["date"] <= as_of]
+        granted, unmatched = allocate_events(subjects, cells, lectures)
 
-        final = pct(sum_att + sum_credit, sum_total)
-        erp_pct = pct(sum_att, sum_total)
-        below = [x["subjectName"] for x in subjects if x["finalPercent"] < THRESHOLD]
-        erp_below = [x["subjectName"] for x in subjects if x["erpPercent"] < THRESHOLD]
+        rows = []
+        for subj in subjects:
+            slots = {}
+            for slot in subj["slots"]:
+                if (subj["key"], slot) not in cells:
+                    continue
+                conducted, present = cells[(subj["key"], slot)]
+                events, credit = granted.get((subj["key"], slot), [0, 0])
+                slots[slot] = {"conducted": conducted, "present": present, "eventSessions": events, "granted": credit}
+            if not slots:
+                continue
+            total = sum(v["conducted"] for v in slots.values())
+            attended = sum(v["present"] for v in slots.values())
+            credit = sum(v["granted"] for v in slots.values())
+            rows.append({
+                "courseId": subj["key"], "subjectCode": subj["code"], "subjectName": subj["name"],
+                "attended": attended, "total": total, "erpPercent": pct(attended, total) or 0.0,
+                "eventSessions": sum(v["eventSessions"] for v in slots.values()), "credit": credit,
+                "finalPercent": pct(attended + credit, total) or 0.0, "slots": slots,
+            })
+
+        sum_att = sum(r["attended"] for r in rows)
+        sum_total = sum(r["total"] for r in rows)
+        sum_credit = sum(r["credit"] for r in rows)
+        final = pct(sum_att + sum_credit, sum_total) or 0.0
+        erp_pct = pct(sum_att, sum_total) or 0.0
+        below = [r["subjectName"] for r in rows if r["total"] and r["finalPercent"] < THRESHOLD]
+        erp_below = [r["subjectName"] for r in rows if r["total"] and r["erpPercent"] < THRESHOLD]
         if final < THRESHOLD:
             key, status = "detained", "Detained"
         elif below:
             key, status = "subject", f"Detained in {len(below)} subject{'s' if len(below) > 1 else ''}"
         else:
             key, status = "clear", "Not detained"
-        counts["subject" if key == "subject" else key] += 1
+        counts[key] += 1
         students.append({
-            "student": {"id": s["id"], **student_info(s)}, "subjects": subjects,
-            "erpPercent": erp_pct, "finalPercent": final, "credit": sum_credit,
+            "student": {"id": s["id"], **student_info(s)}, "subjects": rows,
+            "erpPercent": erp_pct, "finalPercent": final, "credit": sum_credit, "unmatched": unmatched,
             "below": below, "erpBelow": erp_below, "status": status, "statusKey": key,
             "savedByEvents": (erp_pct < THRESHOLD or bool(erp_below)) and key == "clear",
         })
 
-    return {"import": chosen, "imports": imports, "courses": courses, "threshold": THRESHOLD,
-            "counts": counts, "students": students}
+    return {"import": chosen, "imports": imports, "courses": engine.courses_for(class_id),
+            "erpSubjects": subjects, "threshold": THRESHOLD, "counts": counts, "students": students}
 
 
 @app.get("/api/reports/final/{class_id}")
@@ -1325,51 +1665,89 @@ def final_report(class_id: str, importId: str | None = None, user=Depends(requir
 
 @app.get("/api/reports/final/{class_id}/xlsx")
 def final_report_xlsx(class_id: str, importId: str | None = None, user=Depends(require_role("faculty"))):
+    """Final attendance in the ERP matrix layout: every subject and slot, with the granted event lectures."""
     from openpyxl import Workbook
 
     with get_db() as conn:
         require_class(conn, user, class_id)
         report = build_final_report(conn, class_id, importId)
-    imp = report["import"]
+        cls = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
+    imp, subjects = report["import"], report["erpSubjects"]
+    by_student = {r["student"]["id"]: r for r in report["students"]}
+    students = [{"prn": r["student"]["prn"], "roll_no": r["student"].get("rollNo"), "name": r["student"]["name"],
+                 "id": r["student"]["id"]} for r in report["students"]]
+    period_from = formatted(imp["periodFrom"]) if imp.get("periodFrom") else "semester start"
+    info = f"{ERP_PROGRAM}|{imp.get('division') or cls['label']}|{period_from} to {formatted(imp['asOf'])}"
+    cols = ["Conducted", "Present", "Granted", "Total Present", "Absent", "%"]
+
+    def slot_data(s, gi, slot):
+        row = by_student[s["id"]]
+        subj = next((x for x in row["subjects"] if x["courseId"] == subjects[gi]["key"]), None)
+        return subj["slots"].get(slot) if subj else None
+
+    def cell(s, gi, slot, name, r, lt):
+        d = slot_data(s, gi, slot)
+        if d is None:
+            return None
+        return {
+            "Conducted": d["conducted"],
+            "Present": d["present"],
+            "Granted": d["granted"],
+            "Total Present": f"={lt['Present']}{r}+{lt['Granted']}{r}",
+            "Absent": f"={lt['Conducted']}{r}-{lt['Total Present']}{r}",
+            "%": f'=IF({lt["Conducted"]}{r}>0,ROUND({lt["Total Present"]}{r}/{lt["Conducted"]}{r}*100,2),"")',
+        }[name]
+
+    def grand(s, name, r, every, own):
+        if by_student[s["id"]]["statusKey"] == "missing":
+            return None
+        if name in ("Conducted", "Present", "Granted"):
+            return ref_sum(every[name], r)
+        return {
+            "Total Present": f"={own['Present']}{r}+{own['Granted']}{r}",
+            "Absent": f"={own['Conducted']}{r}-{own['Total Present']}{r}",
+            "%": f'=IF({own["Conducted"]}{r}>0,ROUND({own["Total Present"]}{r}/{own["Conducted"]}{r}*100,2),"")',
+        }[name]
+
+    trailing = [
+        ("ERP %", lambda s, r, g: None if by_student[s["id"]]["statusKey"] == "missing"
+            else f'=IF({g["Conducted"]}{r}>0,ROUND({g["Present"]}{r}/{g["Conducted"]}{r}*100,2),"")'),
+        ("Subjects below 75%", lambda s, r, g: ", ".join(by_student[s["id"]]["below"])),
+        ("Status", lambda s, r, g: by_student[s["id"]]["status"]),
+    ]
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Final attendance"
-    ws.append([f"Final attendance: {class_id}. ERP upload '{imp['label']}' (as on {imp['asOf']}) plus approved "
-               f"event sessions up to that date. Generated {datetime.now().strftime('%d-%m-%Y %H:%M')} by {user['name']}."])
-    ws.append([f"Final % = (ERP attended + event sessions) / ERP total, over all subjects. "
-               f"Minimum required: {THRESHOLD:g}% overall and in every subject."])
-    ws.append(["Roll No.", "PRN", "Name", "ERP attended", "Event sessions credited", "ERP total",
-               "ERP %", "Final %", "Subjects below 75%", "Status"])
-    for r in report["students"]:
-        n = ws.max_row + 1
-        if r["statusKey"] == "missing":
-            ws.append([r["student"]["rollNo"], r["student"]["prn"], r["student"]["name"],
-                       "", "", "", "", "", "", "No ERP data"])
-            continue
-        att = sum(x["attended"] for x in r["subjects"])
-        tot = sum(x["total"] for x in r["subjects"])
-        ws.append([r["student"]["rollNo"], r["student"]["prn"], r["student"]["name"], att, r["credit"], tot,
-                   f"=D{n}/F{n}", f"=(D{n}+E{n})/F{n}", ", ".join(r["below"]), r["status"]])
-        ws[f"G{n}"].number_format = "0.00%"
-        ws[f"H{n}"].number_format = "0.00%"
-    style_sheet(ws, [8, 16, 32, 11, 12, 10, 10, 10, 40, 22])
+    write_erp_matrix(
+        ws, "Division wise Subject wise Attendance % (ERP + granted event attendance)", info,
+        [(x["label"], x["slots"]) for x in subjects], cols, students, cell, grand, trailing,
+    )
+    ws.cell(row=3, column=4, value=(
+        f"ERP upload '{imp['label']}' as on {formatted(imp['asOf'])} plus lectures missed for approved events "
+        f"up to that date. Granted is capped at the lectures actually missed. Minimum required: {THRESHOLD:g}%. "
+        f"Generated {datetime.now().strftime('%d-%m-%Y %H:%M')} by {user['name']}."))
+    from openpyxl.styles import Font
+    ws.cell(row=3, column=4).font = Font(name="Arial", italic=True, size=9, color="44546A")
 
-    ws2 = wb.create_sheet("Subject-wise")
-    ws2.append([f"Subject-wise final attendance: {class_id} (circular format)"])
-    ws2.append([""])
-    ws2.append(["Roll No.", "PRN", "Name", "Subject code", "Subject", "ERP attended", "ERP total",
-                "ERP %", "Lectures missed for events", "Total attendance", "Final %", "Status"])
+    ws2 = wb.create_sheet("Summary")
+    ws2.append([f"Final attendance summary: {class_id} ({imp.get('division') or cls['label']})"])
+    ws2.append([f"ERP as on {formatted(imp['asOf'])} + approved event attendance. Minimum {THRESHOLD:g}%."])
+    ws2.append(["Roll No.", "PRN", "Name", "Conducted", "ERP present", "Granted", "Total present",
+                "ERP %", "Final %", "Subjects below 75%", "Status"])
     for r in report["students"]:
-        for x in r["subjects"]:
-            n = ws2.max_row + 1
-            ws2.append([r["student"]["rollNo"], r["student"]["prn"], r["student"]["name"],
-                        x["subjectCode"], x["subjectName"], x["attended"], x["total"], f"=F{n}/G{n}",
-                        x["credit"], f"=F{n}+I{n}", f"=J{n}/G{n}",
-                        f'=IF(K{n}>={THRESHOLD / 100},"OK","Below {THRESHOLD:g}%")'])
-            ws2[f"H{n}"].number_format = "0.00%"
-            ws2[f"K{n}"].number_format = "0.00%"
-    style_sheet(ws2, [8, 16, 30, 14, 30, 10, 10, 10, 12, 12, 10, 12])
+        n = ws2.max_row + 1
+        if r["statusKey"] == "missing":
+            ws2.append([r["student"].get("rollNo"), r["student"]["prn"], r["student"]["name"],
+                        "", "", "", "", "", "", "", "No ERP data"])
+            continue
+        total = sum(x["total"] for x in r["subjects"])
+        present = sum(x["attended"] for x in r["subjects"])
+        ws2.append([r["student"].get("rollNo"), r["student"]["prn"], r["student"]["name"], total, present,
+                    r["credit"], f"=E{n}+F{n}", f'=IF(D{n}>0,ROUND(E{n}/D{n}*100,2),"")',
+                    f'=IF(D{n}>0,ROUND(G{n}/D{n}*100,2),"")', ", ".join(r["below"]), r["status"]])
+        ws2[f"H{n}"].number_format = ws2[f"I{n}"].number_format = "0.00"
+    style_sheet(ws2, [8, 16, 32, 11, 11, 10, 12, 9, 9, 40, 22])
     return xlsx_response(wb, f"Final_attendance_{class_id}_{imp['asOf']}.xlsx")
 
 
@@ -1522,6 +1900,122 @@ def department_detention_list(user=Depends(require_role("faculty"))):
     who = f"{user['name']}, {user['designation'] or 'Faculty'}"
     buffer = detention_docx(entries, who, skipped)
     return docx_response(buffer, f"Detention_List_CSE_{datetime.now().strftime('%Y%m%d')}.docx")
+
+
+
+# =========================================
+# NOTIFICATIONS AND REMINDER
+# =========================================
+
+@app.get("/api/notifications")
+def get_notifications(user=Depends(current_user)):
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT * FROM notifications WHERE user_id = ?
+               ORDER BY created_at DESC LIMIT 30""",
+            (user["id"],),
+        ).fetchall()
+        unread = conn.execute(
+            "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL",
+            (user["id"],),
+        ).fetchone()[0]
+    return {
+        "unread": unread,
+        "notifications": [
+            {"id": r["id"], "title": r["title"], "body": r["body"], "kind": r["kind"],
+             "applicationId": r["application_id"], "createdAt": r["created_at"],
+             "readAt": r["read_at"]}
+            for r in rows
+        ],
+    }
+
+
+@app.patch("/api/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: str, user=Depends(current_user)):
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM notifications WHERE id = ?", (notification_id,)).fetchone()
+        if not row or row["user_id"] != user["id"]:
+            raise ApiError(404, "Notification not found.")
+        conn.execute("UPDATE notifications SET read_at = ? WHERE id = ?", (now_iso(), notification_id))
+    return {"ok": True}
+
+
+@app.patch("/api/notifications/read-all")
+def mark_all_read(user=Depends(current_user)):
+    with get_db() as conn:
+        conn.execute("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
+                     (now_iso(), user["id"]))
+    return {"ok": True}
+
+
+@app.patch("/api/applications/{application_id}/student-read")
+def student_mark_read(application_id: str, user=Depends(require_role("student"))):
+    with get_db() as conn:
+        row = get_application(conn, application_id)
+        if row["student_id"] != user["id"]:
+            raise ApiError(403, "Not your application.")
+        conn.execute("UPDATE applications SET student_unread = 0 WHERE id = ?", (application_id,))
+    return {"ok": True}
+
+
+@app.post("/api/applications/{application_id}/reminder")
+def send_reminder(application_id: str, user=Depends(require_role("student"))):
+    with get_db() as conn:
+        row = get_application(conn, application_id)
+        if row["student_id"] != user["id"]:
+            raise ApiError(403, "Not your application.")
+        if row["status"] != "pending":
+            raise ApiError(409, f"This application was already {row['status']}.")
+        submitted = row["submitted_at"]
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(submitted.replace("Z", "+00:00"))
+        if age.total_seconds() < 86400:
+            hours_left = int((86400 - age.total_seconds()) / 3600) + 1
+            raise ApiError(429, f"Reminders can be sent 24 hours after submitting. "
+                                f"Try again in about {hours_left} hour{'s' if hours_left != 1 else ''}.")
+        last = row["reminder_sent_at"]
+        if last:
+            since = datetime.now(timezone.utc) - datetime.fromisoformat(last.replace("Z", "+00:00"))
+            if since.total_seconds() < 86400:
+                raise ApiError(429, "You already sent a reminder in the last 24 hours.")
+        conn.execute("UPDATE applications SET reminder_sent_at = ? WHERE id = ?",
+                     (now_iso(), application_id))
+        notify_faculty_new_app(conn, row["class_id"], user["name"],
+                               f"waiting for review since {row['submitted_at'][:10]} ({row['event_name']})",
+                               application_id, title="Reminder from student", kind="reminder")
+    return {"ok": True, "eventName": row["event_name"]}
+
+
+@app.patch("/api/applications/{application_id}/upload-certificate")
+async def upload_certificate(
+    application_id: str,
+    file: UploadFile | None = File(None),
+    user=Depends(require_role("student")),
+):
+    if file is None or not file.filename:
+        raise ApiError(400, "Choose the certificate file.")
+    content, upload = await read_upload(file, "participation certificate")
+    with get_db() as conn:
+        row = get_application(conn, application_id)
+        if row["student_id"] != user["id"]:
+            raise ApiError(403, "Not your application.")
+        if row["status"] == "rejected":
+            raise ApiError(409, "This application was rejected and can't be updated.")
+        if not row["certificate_pending"]:
+            raise ApiError(409, "A certificate was already uploaded for this application.")
+        stored = f"{uuid.uuid4()}{ALLOWED_FILE_TYPES[upload.content_type]}"
+        (UPLOAD_DIR / stored).write_bytes(content)
+        conn.execute(
+            """INSERT INTO documents (id, application_id, kind, stored_name, original_name,
+                   mime_type, size) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (str(uuid.uuid4()), application_id, "evidence", stored,
+             Path(upload.filename).name, upload.content_type, len(content)),
+        )
+        conn.execute("UPDATE applications SET certificate_pending = 0, unread = 1 WHERE id = ?",
+                     (application_id,))
+        notify_faculty_new_app(conn, row["class_id"], user["name"],
+                               f"certificate uploaded for {row['event_name']}", application_id,
+                               title="Certificate uploaded")
+        return {"application": application_json(get_application(conn, application_id), conn)}
 
 
 if __name__ == "__main__":

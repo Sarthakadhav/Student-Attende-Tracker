@@ -1647,3 +1647,84 @@ button:disabled {
     padding-left: 14px;
   }
 }
+
+/* =========================================
+   NOTIFICATION BELL DROPDOWN
+========================================= */
+.notif-wrap { position: relative; }
+
+.notification-badge {
+  position: absolute; top: -4px; right: -4px;
+  background: var(--bad); color: #fff; border-radius: 999px;
+  font-size: 10px; font-weight: 750; min-width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center; padding: 0 4px;
+  pointer-events: none;
+}
+
+.notif-dropdown {
+  position: absolute; top: calc(100% + 10px); right: -8px; z-index: 200;
+  width: 340px; max-height: 420px; display: flex; flex-direction: column;
+  background: white; border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.14);
+}
+
+.notif-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--line);
+}
+.notif-header strong { font-size: 14px; color: var(--heading); }
+.notif-mark-all {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--primary); background: none; border: none;
+  cursor: pointer; padding: 0;
+}
+
+.notif-list { overflow-y: auto; flex: 1; }
+.notif-empty { padding: 20px 16px; color: var(--muted); font-size: 13px; text-align: center; }
+
+.notif-item {
+  display: block; width: 100%; text-align: left; padding: 12px 16px;
+  border: none; border-bottom: 1px solid var(--line-soft);
+  background: none; cursor: pointer; transition: background .15s;
+}
+.notif-item:hover { background: #f7f9fc; }
+.notif-unread { background: #f0f6ff; }
+.notif-item-title { font-size: 13px; font-weight: 650; color: var(--heading); margin-bottom: 2px; }
+.notif-item-body { font-size: 12px; color: var(--text); margin-bottom: 4px; line-height: 1.4; }
+.notif-item-time { font-size: 11px; color: var(--muted); }
+
+/* =========================================
+   STUDENT APPLICATION ROW EXTRAS
+========================================= */
+.row-unread { background: #f5f8ff; }
+.row-unread::before { content: ""; display: block; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--primary); border-radius: 3px 0 0 3px; }
+.application-row { position: relative; }
+
+.cert-pending-tag { background: #fff3cd; color: #7a5700; }
+.cert-upload-inline { margin-top: 10px; padding: 10px; background: #f7f9fc; border-radius: 8px; border: 1px dashed var(--line); }
+.cert-upload-actions { display: flex; gap: 8px; margin-top: 8px; }
+.cert-upload-btn, .small-btn { padding: 5px 10px; font-size: 12px; gap: 5px; }
+.cert-skip-hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+.reminder-btn {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 8px;
+  font-size: 12px; padding: 4px 10px; border: 1px solid var(--line);
+  border-radius: 6px; background: #fffbf0; color: var(--pending); cursor: pointer;
+}
+.reminder-btn:hover { background: #fff3cd; }
+.reminder-sent { font-size: 12px; color: var(--good); margin-top: 6px; display: block; }
+.reminder-hint { font-size: 11px; color: var(--muted); margin-top: 6px; display: block; }
+
+/* Locked certificate field */
+.locked-field { margin-bottom: 18px; }
+.locked-hint {
+  margin-top: 6px; padding: 10px 14px; background: #f5f5f5; border-radius: 8px;
+  border: 1px dashed #ccc; font-size: 13px; color: var(--muted);
+}
+.optional-tag { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+
+/* Role label in signup */
+.role-label {
+  padding: 10px 14px; background: #f7f9fc; border: 1px solid var(--line);
+  border-radius: 9px; font-size: 14px; color: var(--heading); font-weight: 600;
+}

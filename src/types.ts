@@ -65,6 +65,16 @@ export type StudentInfo = {
   classId: string;
 };
 
+export type Notification = {
+  id: string;
+  title: string;
+  body: string;
+  kind: "new_application" | "reviewed" | "reminder";
+  applicationId: string | null;
+  createdAt: string;
+  readAt: string | null;
+};
+
 export type LeaveApplication = {
   id: string;
   studentId: string;
@@ -81,6 +91,9 @@ export type LeaveApplication = {
   evidenceType: EvidenceType;
   status: ApplicationStatus;
   unread: boolean;
+  studentUnread: boolean;
+  certificatePending: boolean;
+  reminderSentAt: string | null;
   remark: string;
   submittedAt: string;
   reviewedAt: string | null;
@@ -124,6 +137,9 @@ export type ErpImport = {
   uploadedBy: string;
   uploadedAt: string;
   students: number;
+  division?: string;
+  periodFrom?: string | null;
+  periodTo?: string | null;
 };
 
 export type EventReport = {
@@ -136,7 +152,10 @@ export type EventReport = {
     total: number;
     approvedApplications: number;
     pendingApplications: number;
+    /** ERP attended/total per subject from the newest ERP upload (empty if none). */
+    erp: Record<string, { attended: number; total: number }>;
   }[];
+  erpImport: ErpImport | null;
 };
 
 export type FinalSubject = {
@@ -149,6 +168,8 @@ export type FinalSubject = {
   eventSessions: number;
   credit: number;
   finalPercent: number;
+  /** Per ERP slot (Lab / Lecture): conducted, present, event lectures and granted. */
+  slots?: Record<string, { conducted: number; present: number; eventSessions: number; granted: number }>;
 };
 
 export type FinalStatus = "detained" | "subject" | "clear" | "missing";

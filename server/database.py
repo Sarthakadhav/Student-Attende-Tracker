@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS applications (
     evidence_type TEXT NOT NULL,            -- certificate / authority_permission / medical_certificate
     status        TEXT NOT NULL DEFAULT 'pending',
     unread        INTEGER NOT NULL DEFAULT 1,
+    student_unread INTEGER NOT NULL DEFAULT 0,   -- student hasn't seen the decision yet
+    certificate_pending INTEGER NOT NULL DEFAULT 0, -- pre-approval only; certificate to be uploaded after the event
+    reminder_sent_at TEXT,                        -- last reminder sent to faculty
     remark        TEXT NOT NULL DEFAULT '',
     submitted_at  TEXT NOT NULL,
     reviewed_at   TEXT,
@@ -107,6 +110,43 @@ CREATE TABLE IF NOT EXISTS erp_records (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_class ON users(class_id);
+
+-- ERP "Subject wise Attendance" matrix: subjects of one upload, and each student's numbers per slot.
+CREATE TABLE IF NOT EXISTS erp_subjects (
+    import_id   TEXT NOT NULL REFERENCES erp_imports(id) ON DELETE CASCADE,
+    ord         INTEGER NOT NULL,
+    subject_key TEXT NOT NULL,
+    code        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    label       TEXT NOT NULL,
+    slots       TEXT NOT NULL,      -- JSON list, e.g. ["Lab", "Lecture"]
+    course_id   TEXT,               -- matching time-table course (for event lectures), if any
+    PRIMARY KEY (import_id, subject_key)
+);
+
+CREATE TABLE IF NOT EXISTS erp_cells (
+    import_id   TEXT NOT NULL REFERENCES erp_imports(id) ON DELETE CASCADE,
+    student_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_key TEXT NOT NULL,
+    slot        TEXT NOT NULL,
+    conducted   INTEGER NOT NULL,
+    present     INTEGER NOT NULL,
+    PRIMARY KEY (import_id, student_id, subject_key, slot)
+);
+
+-- In-app notifications (new application / reviewed / reminder)
+CREATE TABLE IF NOT EXISTS notifications (
+    id             TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title          TEXT NOT NULL,
+    body           TEXT NOT NULL,
+    kind           TEXT NOT NULL,       -- new_application / reviewed / reminder
+    application_id TEXT,
+    created_at     TEXT NOT NULL,
+    read_at        TEXT                 -- NULL = unread
+);
+CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read_at, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_apps_student ON applications(student_id);
 CREATE INDEX IF NOT EXISTS idx_apps_class ON applications(class_id);
 """
@@ -128,6 +168,22 @@ def get_db():
         conn.close()
 
 
+# Columns added after the first release. Older databases get them here, so nobody has to
+# delete their data when updating.
+MIGRATIONS = [
+    ("applications", "student_unread", "INTEGER NOT NULL DEFAULT 0"),
+    ("applications", "certificate_pending", "INTEGER NOT NULL DEFAULT 0"),
+    ("applications", "reminder_sent_at", "TEXT"),
+    ("erp_imports", "division", "TEXT NOT NULL DEFAULT ''"),
+    ("erp_imports", "period_from", "TEXT"),
+    ("erp_imports", "period_to", "TEXT"),
+]
+
+
 def init_db():
     with get_db() as conn:
         conn.executescript(SCHEMA)
+        for table, column, definition in MIGRATIONS:
+            existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

@@ -1,4 +1,5 @@
 import type {
+  Notification,
   Academic,
   AuthResponse,
   ClassInfo,
@@ -129,9 +130,16 @@ export type Calculation = {
 export type ErpImportResult = {
   importId: string;
   replaced: boolean;
+  label: string;
+  asOf: string;
+  division: string;
+  periodFrom: string | null;
+  periodTo: string | null;
   students: number;
   subjects: number;
+  unmatchedSubjects: string[];
   unknownPrns: string[];
+  unknownCount: number;
   missingStudents: number;
 };
 
@@ -169,6 +177,30 @@ export const api = {
     ),
 
   calculation: (id: string) => request<Calculation>(`/api/applications/${id}/calculation`),
+
+  studentMarkRead: (id: string) =>
+    request<{ ok: boolean }>(`/api/applications/${id}/student-read`, { method: "PATCH" }),
+
+  sendReminder: (id: string) =>
+    request<{ ok: boolean; eventName: string }>(`/api/applications/${id}/reminder`, { method: "POST" }),
+
+  uploadCertificate: (id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ application: import("./types").LeaveApplication }>(
+      `/api/applications/${id}/upload-certificate`,
+      { method: "PATCH", body: form }
+    );
+  },
+
+  notifications: () =>
+    request<{ unread: number; notifications: Notification[] }>("/api/notifications"),
+
+  markNotificationRead: (id: string) =>
+    request<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: "PATCH" }),
+
+  markAllNotificationsRead: () =>
+    request<{ ok: boolean }>("/api/notifications/read-all", { method: "PATCH" }),
 
   markRead: (id: string) =>
     request<{ application: LeaveApplication }>(`/api/applications/${id}/read`, { method: "PATCH" }),

@@ -199,3 +199,16 @@ def phase_key(phases: list[dict], iso_date: str) -> str | None:
         if p["start"] <= iso_date <= p["end"]:
             return p["key"]
     return None
+
+
+def slot_of(lecture_type: str) -> str:
+    """Time-table block type -> ERP slot name."""
+    return "Lab" if (lecture_type or "").upper() in ("LAB", "PR", "PRACTICAL") else "Lecture"
+
+
+def course_slots(class_id: str) -> dict[str, list[str]]:
+    """Which ERP slots (Lab / Lecture) each course has in the time table, in ERP order (Lab first)."""
+    found: dict[str, set] = {}
+    for block in timetable(class_id).get("blocks", []):
+        found.setdefault(block["course"], set()).add(slot_of(block.get("type", "TH")))
+    return {cid: [s for s in ("Lab", "Lecture") if s in slots] for cid, slots in found.items()}

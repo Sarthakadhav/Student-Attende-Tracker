@@ -1,0 +1,9 @@
+# Files to ignore when deploying with Vercel CLI
+server/
+venv/
+__pycache__/
+*.pyc
+node_modules/
+.git/
+.vscode/
+*.local

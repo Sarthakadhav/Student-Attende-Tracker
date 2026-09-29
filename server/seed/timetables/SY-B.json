@@ -1,0 +1,368 @@
+{
+  "class": "SY-B",
+  "wef": "2026-08-19",
+  "slotTimes": {
+    "1": [
+      "10:00",
+      "10:55"
+    ],
+    "2": [
+      "10:55",
+      "11:50"
+    ],
+    "3": [
+      "12:30",
+      "13:30"
+    ],
+    "4": [
+      "13:30",
+      "14:30"
+    ],
+    "5": [
+      "14:50",
+      "15:50"
+    ],
+    "6": [
+      "15:50",
+      "16:50"
+    ]
+  },
+  "courses": [
+    {
+      "id": "OE1",
+      "code": "24UCSOEXXX",
+      "name": "Open Elective-1",
+      "faculty": "Mr. Arya Abhishek",
+      "counted": true
+    },
+    {
+      "id": "SEM1",
+      "code": "24UCSPR201",
+      "name": "Seminar-1",
+      "faculty": "Ms. Jyotimoyee Kalita",
+      "counted": true
+    },
+    {
+      "id": "MC3",
+      "code": "24UCSMC201",
+      "name": "Mandatory Course: III (Soft Skill)",
+      "faculty": "Mr. Siddhesh Bramhane",
+      "counted": true
+    },
+    {
+      "id": "FM",
+      "code": "24UCSMD201",
+      "name": "Financial Management",
+      "faculty": "Dr. Bandna Thakur",
+      "counted": true
+    },
+    {
+      "id": "DM",
+      "code": "24UCSAE201",
+      "name": "Discrete Mathematics",
+      "faculty": "Mr. Gnana Prakash Duesty",
+      "counted": true
+    },
+    {
+      "id": "FL1",
+      "code": "24UCSVE201",
+      "name": "Foreign Language - I",
+      "faculty": "Mr. Dhaleshwar Roushan (Japanese) / Ms. Tanvi Rahul Chatse (German)",
+      "counted": true
+    },
+    {
+      "id": "CN",
+      "code": "24UCSPC201",
+      "name": "Computer Networks",
+      "faculty": "Dr. Nitin Rameshrao Chopde",
+      "counted": true
+    },
+    {
+      "id": "DBMS",
+      "code": "24UCSPC202",
+      "name": "Database Management System",
+      "faculty": "Dr. Mahendra Bhatu Gawali",
+      "counted": true
+    },
+    {
+      "id": "CJP",
+      "code": "24UCSPC203",
+      "name": "Core Java Programming (HCL)",
+      "faculty": "Ms. Sapna Malviya / Mr. Siddesh",
+      "counted": true
+    },
+    {
+      "id": "LinkedIn",
+      "name": "LinkedIn",
+      "counted": false
+    },
+    {
+      "id": "HCL Tech",
+      "name": "HCL Tech",
+      "counted": false
+    },
+    {
+      "id": "Sports",
+      "name": "Sports",
+      "counted": false
+    },
+    {
+      "id": "Library",
+      "name": "Library",
+      "counted": false
+    },
+    {
+      "id": "Mentor Mentee",
+      "name": "Mentor Mentee",
+      "counted": false
+    }
+  ],
+  "blocks": [
+    {
+      "day": "MON",
+      "slots": [
+        1
+      ],
+      "course": "CN",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        2
+      ],
+      "course": "DBMS",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        3
+      ],
+      "course": "LinkedIn",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        4
+      ],
+      "course": "Sports",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        5
+      ],
+      "course": "Sports",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        6
+      ],
+      "course": "DM",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "FL1",
+      "type": "TH",
+      "group": "Japanese"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        3
+      ],
+      "course": "CN",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        4
+      ],
+      "course": "DM",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        5
+      ],
+      "course": "DBMS",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        6
+      ],
+      "course": "CJP",
+      "type": "TH"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        1
+      ],
+      "course": "CN",
+      "type": "TH"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        2
+      ],
+      "course": "HCL Tech",
+      "type": "TH"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "SEM1",
+      "type": "TH"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        5
+      ],
+      "course": "FM",
+      "type": "TH"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        6
+      ],
+      "course": "CJP",
+      "type": "TH"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "FL1",
+      "type": "TH",
+      "group": "German"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "SEM1",
+      "type": "TH"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "CJP",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        1
+      ],
+      "course": "CJP",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        2
+      ],
+      "course": "DBMS",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        3
+      ],
+      "course": "HCL Tech",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        4
+      ],
+      "course": "FM",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "DBMS",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "Mentor Mentee",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        3
+      ],
+      "course": "MC3",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        4
+      ],
+      "course": "MC3",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        5
+      ],
+      "course": "MC3",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        6
+      ],
+      "course": "Library",
+      "type": "TH"
+    }
+  ],
+  "notes": [
+    "All lectures in room 103.",
+    "Foreign Language: Japanese on Tuesday, German on Thursday. A student attends only their own language.",
+    "Open Elective-1 has no slot in the time table grid."
+  ]
+}

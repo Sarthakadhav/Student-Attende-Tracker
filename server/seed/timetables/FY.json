@@ -1,0 +1,342 @@
+{
+  "class": "FY",
+  "wef": "2026-06-15",
+  "slotTimes": {
+    "1": [
+      "10:00",
+      "10:55"
+    ],
+    "2": [
+      "10:55",
+      "11:50"
+    ],
+    "3": [
+      "12:30",
+      "13:30"
+    ],
+    "4": [
+      "13:30",
+      "14:30"
+    ],
+    "5": [
+      "14:50",
+      "15:50"
+    ],
+    "6": [
+      "15:50",
+      "16:50"
+    ]
+  },
+  "courses": [
+    {
+      "id": "M1",
+      "code": "24UCSBS101",
+      "name": "Mathematics-I",
+      "faculty": "Ms. Poonam",
+      "counted": true
+    },
+    {
+      "id": "IKS",
+      "code": "24UETIK101",
+      "name": "Indian Knowledge System",
+      "faculty": "Dr. M.B. Gawali",
+      "counted": true
+    },
+    {
+      "id": "ADP",
+      "code": "24UETES101",
+      "name": "Application Development Practices",
+      "faculty": "Jyotimoyee Kalita",
+      "counted": true
+    },
+    {
+      "id": "DSC",
+      "code": "24UCSES102",
+      "name": "Introduction of Data Structure using C++",
+      "faculty": "Ms. Sapna Malviya / Mr. Siddesh",
+      "counted": true
+    },
+    {
+      "id": "ENG",
+      "code": "24UETAE101",
+      "name": "English - Oral and Written Communication Skills",
+      "faculty": "English Faculty",
+      "counted": true
+    },
+    {
+      "id": "DTIL",
+      "code": "24UETVS101",
+      "name": "Design Thinking and Idea Lab",
+      "faculty": "Dr. Nitin Chopde / Mr. Anuj Joshi",
+      "counted": true
+    },
+    {
+      "id": "CC",
+      "code": "24UETCC101",
+      "name": "NSS / Yoga / Sports / Liberal Arts / FL",
+      "faculty": "Tanay / Hirak / Sarika / FL Faculty",
+      "counted": true
+    },
+    {
+      "id": "BQC",
+      "code": "24UCSPC101",
+      "name": "Basic of Quantum Computing",
+      "faculty": "Dr. M.B. Gawali",
+      "counted": true
+    },
+    {
+      "id": "MC1",
+      "code": "24UETMC101",
+      "name": "Mandatory Course I",
+      "faculty": "Ms. Poonam",
+      "counted": true
+    },
+    {
+      "id": "HCL Tech",
+      "name": "HCL Tech",
+      "counted": false
+    },
+    {
+      "id": "Library",
+      "name": "Library",
+      "counted": false
+    },
+    {
+      "id": "Mentor Mentee",
+      "name": "Mentor Mentee",
+      "counted": false
+    },
+    {
+      "id": "Activity",
+      "name": "Activity",
+      "counted": false
+    }
+  ],
+  "blocks": [
+    {
+      "day": "MON",
+      "slots": [
+        1
+      ],
+      "course": "M1",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        2
+      ],
+      "course": "DSC",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        3
+      ],
+      "course": "ADP",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        4
+      ],
+      "course": "HCL Tech",
+      "type": "TH"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "ENG",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        1
+      ],
+      "course": "ENG",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        2
+      ],
+      "course": "DSC",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        3
+      ],
+      "course": "IKS",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        4
+      ],
+      "course": "M1",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        5
+      ],
+      "course": "CC",
+      "type": "TH"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        6
+      ],
+      "course": "ADP",
+      "type": "TH"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        1
+      ],
+      "course": "M1",
+      "type": "TH"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        2
+      ],
+      "course": "IKS",
+      "type": "TH"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "DTIL",
+      "type": "LAB"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "CC",
+      "type": "TH"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "ADP",
+      "type": "LAB",
+      "room": "306"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "DSC",
+      "type": "LAB",
+      "room": "306"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        5
+      ],
+      "course": "M1",
+      "type": "TH"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        6
+      ],
+      "course": "IKS",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        1
+      ],
+      "course": "ADP",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        2
+      ],
+      "course": "DSC",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "BQC",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "DTIL",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "Mentor Mentee",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "Library",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "Activity",
+      "type": "TH"
+    }
+  ],
+  "notes": [
+    "Rooms are 107 unless noted.",
+    "Tuesday period 5 (Foreign Language) and Wednesday 5-6 (Sports) are mapped to course 24UETCC101. Confirm with the coordinator.",
+    "Mandatory Course I has no slot in the time table grid."
+  ]
+}

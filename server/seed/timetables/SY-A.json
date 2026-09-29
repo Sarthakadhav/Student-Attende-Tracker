@@ -1,0 +1,367 @@
+{
+  "class": "SY-A",
+  "wef": "2026-06-15",
+  "slotTimes": {
+    "1": [
+      "10:00",
+      "10:55"
+    ],
+    "2": [
+      "10:55",
+      "11:50"
+    ],
+    "3": [
+      "12:30",
+      "13:30"
+    ],
+    "4": [
+      "13:30",
+      "14:30"
+    ],
+    "5": [
+      "14:50",
+      "15:50"
+    ],
+    "6": [
+      "15:50",
+      "16:50"
+    ]
+  },
+  "courses": [
+    {
+      "id": "OE1",
+      "code": "24UCSOEXXX",
+      "name": "Open Elective-1",
+      "faculty": "Mr. Siddhesh",
+      "counted": true
+    },
+    {
+      "id": "SEM1",
+      "code": "24UCSPR201",
+      "name": "Seminar-1",
+      "faculty": "Ms. Jyotimoyee",
+      "counted": true
+    },
+    {
+      "id": "MC3",
+      "code": "24UCSMC201",
+      "name": "Mandatory Course: III (Soft Skill)",
+      "faculty": "Mr. Arya Abhishek",
+      "counted": true
+    },
+    {
+      "id": "FM",
+      "code": "24UCSMD201",
+      "name": "Financial Management",
+      "faculty": "Dr. Bhandna Thakur",
+      "counted": true
+    },
+    {
+      "id": "ASD",
+      "code": "24UCSAE201",
+      "name": "Analytical Skill Development",
+      "faculty": "Mr. Gnana Prakash Dusetty",
+      "counted": true
+    },
+    {
+      "id": "FL1",
+      "code": "24UCSVE201",
+      "name": "Foreign Language - I",
+      "faculty": "Foreign Language faculty",
+      "counted": true
+    },
+    {
+      "id": "CN",
+      "code": "24UCSPC201",
+      "name": "Computer Networks",
+      "faculty": "Dr. Nitin Chopde",
+      "counted": true
+    },
+    {
+      "id": "DSA",
+      "code": "24UCSPC202",
+      "name": "Data Structures and Algorithms",
+      "faculty": "Mr. Siddhesh / Ms. Sapna Malviya",
+      "counted": true
+    },
+    {
+      "id": "CJP",
+      "code": "24UCSPC203",
+      "name": "Core Java Programming (HCL)",
+      "faculty": "Ms. Sapna Malviya / Mr. Siddhesh",
+      "counted": true
+    },
+    {
+      "id": "LinkedIn",
+      "name": "LinkedIn",
+      "counted": false
+    },
+    {
+      "id": "HCL Tech",
+      "name": "HCL Tech",
+      "counted": false
+    },
+    {
+      "id": "Sports",
+      "name": "Sports",
+      "counted": false
+    },
+    {
+      "id": "Library",
+      "name": "Library",
+      "counted": false
+    },
+    {
+      "id": "Mentor Mentee",
+      "name": "Mentor Mentee",
+      "counted": false
+    }
+  ],
+  "blocks": [
+    {
+      "day": "MON",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "DSA",
+      "type": "LAB",
+      "room": "304"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        3
+      ],
+      "course": "CN",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        4
+      ],
+      "course": "CJP",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "MON",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "FL1",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "SEM1",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        3
+      ],
+      "course": "ASD",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        4
+      ],
+      "course": "LinkedIn",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        5
+      ],
+      "course": "CJP",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "TUE",
+      "slots": [
+        6
+      ],
+      "course": "DSA",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "CJP",
+      "type": "LAB",
+      "room": "304"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        3
+      ],
+      "course": "HCL Tech",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        4
+      ],
+      "course": "FM",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "WED",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "DSA",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        1
+      ],
+      "course": "CN",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        2
+      ],
+      "course": "CJP",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "FL1",
+      "type": "TH"
+    },
+    {
+      "day": "THU",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "Sports",
+      "type": "TH"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        1
+      ],
+      "course": "DSA",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        2
+      ],
+      "course": "ASD",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        3
+      ],
+      "course": "FM",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        4
+      ],
+      "course": "CN",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        5
+      ],
+      "course": "HCL Tech",
+      "type": "TH",
+      "room": "106"
+    },
+    {
+      "day": "FRI",
+      "slots": [
+        6
+      ],
+      "course": "Library",
+      "type": "TH"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        1,
+        2
+      ],
+      "course": "Mentor Mentee",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        3,
+        4
+      ],
+      "course": "SEM1",
+      "type": "TH",
+      "room": "304"
+    },
+    {
+      "day": "SAT",
+      "slots": [
+        5,
+        6
+      ],
+      "course": "MC3",
+      "type": "TH",
+      "room": "304"
+    }
+  ],
+  "notes": [
+    "Open Elective-1 has no slot in the time table grid.",
+    "Thursday periods 3-4 Foreign Language is marked ONLINE."
+  ]
+}

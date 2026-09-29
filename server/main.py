@@ -72,11 +72,40 @@ if "JWT_SECRET" not in os.environ:
 # APP
 # =========================================
 
-app = FastAPI(title="CSE Duty Leave & Attendance API")
+app = FastAPI(
+    title="CSE Duty Leave & Attendance API",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redirect_slashes=False,
+)
+
+configured_origins = [o.strip() for o in CLIENT_URL.split(",") if o.strip()]
+if "*" in configured_origins:
+    allow_origins = ["*"]
+else:
+    allow_origins = list(set(configured_origins + ["http://localhost:5173", "http://localhost:3000"]))
+
 app.add_middleware(
-    CORSMiddleware, allow_origins=[CLIENT_URL], allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 init_db()
+
+
+@app.get("/")
+@app.get("/api")
+@app.get("/api/health")
+def api_health():
+    return {
+        "status": "ok",
+        "service": "Attendance Portal API",
+        "version": "1.0.0",
+        "timestamp": now_iso(),
+    }
 
 
 class ApiError(HTTPException):

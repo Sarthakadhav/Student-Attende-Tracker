@@ -17,10 +17,21 @@ import type {
 
 const TOKEN_KEY = "attendance_portal_token";
 
+/**
+ * The login is kept per browser tab (sessionStorage), so a student and a coordinator can be
+ * logged in side by side in two tabs without one login replacing the other.
+ * It survives a page refresh; closing the tab logs out.
+ */
 export const tokenStore = {
-  get: () => localStorage.getItem(TOKEN_KEY),
-  set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
+  get: () => sessionStorage.getItem(TOKEN_KEY),
+  set: (token: string) => {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.removeItem(TOKEN_KEY); // clean up the old shared login from earlier versions
+  },
+  clear: () => {
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+  },
 };
 
 export class ApiError extends Error {
